@@ -1,0 +1,18 @@
+{
+  "host": "0.0.0.0",
+  "port": 9090,
+  "version": "1.0.0",
+  "allowLanAdministration": false,
+  "ollamaUrl": "http://127.0.0.1:11434",
+  "imageRuntime": {
+    "url": "http://127.0.0.1:1234",
+    "modelLabel": "FLUX.2 Klein 4B",
+    "mode": "auto",
+    "model": "",
+    "diffusionModel": "",
+    "textEncoder": "",
+    "vae": "",
+    "steps": 4,
+    "cfgScale": 1
+  }
+}

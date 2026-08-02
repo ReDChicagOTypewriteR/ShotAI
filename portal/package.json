@@ -1,0 +1,23 @@
+{
+  "name": "shotai-portal",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build && node scripts/finalize-build.mjs",
+    "preview": "vite preview",
+    "package:static": "npm run build && node scripts/package-static.mjs",
+    "check:static": "node scripts/check-static.mjs"
+  },
+  "dependencies": {
+    "vue": "3.5.40"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.5",
+    "typescript": "5.9.3",
+    "vite": "8.1.5",
+    "vite-plugin-singlefile": "^2.3.3",
+    "vue-tsc": "3.3.8"
+  }
+}

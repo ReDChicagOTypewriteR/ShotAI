@@ -1,0 +1,9 @@
+ShotAI 1.0 bundled runtime
+Component: Ollama Windows AMD64
+Version: v0.32.5
+Official source: https://github.com/ollama/ollama/releases/tag/v0.32.5
+Archive: ollama-windows-amd64.zip
+Archive SHA-256: 7c941ae084569d298062d29f8139163a3187c76dbca0479c70d085e78fd8c7bb
+License: MIT (see LICENSE.ollama.txt)
+
+These files are redistributed unchanged from the official Ollama release.

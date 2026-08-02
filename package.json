@@ -1,0 +1,48 @@
+{
+  "name": "shotai-demo",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:mock-ollama": "node scripts/mock-ollama.mjs",
+    "check:ollama": "node scripts/check-ollama-integration.mjs",
+    "check:rag-ui": "node scripts/check-rag-ui.mjs",
+    "check:vision-ui": "node scripts/check-vision-ui.mjs",
+    "check:vision-import": "node scripts/check-vision-import.mjs",
+    "check:plain-language": "node scripts/check-plain-language-ui.mjs",
+    "check:attachment-ui": "node scripts/check-attachment-ui.mjs",
+    "check:chat-ux": "node scripts/check-chat-ux.mjs",
+    "check:answer-ui": "node scripts/check-answer-formatting.mjs",
+    "check:image-generation": "node scripts/check-image-generation.mjs",
+    "check:image-package": "node scripts/check-image-package.mjs",
+    "check:v1-ui": "node scripts/check-v1-ui.mjs",
+    "check:v1-server": "node scripts/check-v1-server.mjs",
+    "check:improvements": "node scripts/check-platform-improvements.mjs",
+    "check:lan-proxy": "node scripts/check-lan-proxy.mjs",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "serve:lan": "node scripts/serve-lan.mjs",
+    "package:lan": "npm run build && node scripts/package-lan.mjs && npm run check:image-package"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "dompurify": "^3.4.12",
+    "element-plus": "^2.14.3",
+    "hash-wasm": "^4.12.0",
+    "mammoth": "^1.12.0",
+    "marked": "^18.0.7",
+    "pdfjs-dist": "^6.1.200",
+    "vue": "^3.5.40",
+    "vue-element-plus-x": "^2.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@vitejs/plugin-legacy": "^8.2.2",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "playwright-core": "^1.62.0",
+    "typescript": "5.9.3",
+    "vite": "^8.1.5",
+    "vue-tsc": "^3.3.8"
+  }
+}

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./shotai-logo.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="ShotAI 完全离线人工智能工作台演示"
+    />
+    <title>ShotAI · 离线智能工作台</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script nomodule>
+      document.getElementById("app").innerHTML =
+        '<main style="max-width:680px;margin:80px auto;padding:28px;font:16px/1.7 Segoe UI,Microsoft YaHei,sans-serif;color:#f5f7f8;background:#111519;border:1px solid #39424a">' +
+        "<h1>当前浏览器版本过低</h1>" +
+        "<p>ShotAI 需要支持现代网页模块的浏览器。请升级到新版 Chrome、Edge 或 Firefox 后重新打开。</p>" +
+        "</main>";
+    </script>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

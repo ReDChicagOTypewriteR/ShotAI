@@ -1,0 +1,14 @@
+ShotAI Windows 图片运行组件
+
+来源：leejet/stable-diffusion.cpp 官方 GitHub Release
+版本：master-805-e31a86c
+发布日期：2026-07-30
+
+主运行包：sd-master-e31a86c-bin-win-cuda12-x64.zip
+SHA-256：e1e7725ac7828624831f656b55e5aa469d3b2d467cfd8711df9c084fc3aea839
+
+CUDA 运行包：cudart-sd-bin-win-cu12-x64.zip
+SHA-256：fe20366827d357c00797eebb58244dddab7fd9a348d70090c3871004c320f38d
+
+项目地址：https://github.com/leejet/stable-diffusion.cpp
+许可证文件：stable-diffusion.cpp.txt、ggml.txt

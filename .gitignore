@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+portal/node_modules/
+
+# Build outputs
+dist/
+portal/dist/
+release/
+
+# Local configuration
+.env
+.env.*
+!.env.example
+*.local
+*.log
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+
+# Runtime models
+*.gguf
+*.safetensors
+*.ckpt
+*.onnx
+
+# Keep the small contract-test model
+!scripts/fixtures/shotai-contract-test.gguf
+
+# Third-party runtime binaries
+vendor/**/*.dll
+vendor/**/*.exe
+vendor/**/*.zip
