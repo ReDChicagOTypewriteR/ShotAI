@@ -1,7 +1,11 @@
 {
-  "name": "shotai-demo",
+  "name": "shotai",
+  "productName": "ShotAI",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.3",
+  "description": "ShotAI 本地与内网 AI 工作台",
+  "author": "ShotAI",
+  "main": "desktop/electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -18,12 +22,26 @@
     "check:image-package": "node scripts/check-image-package.mjs",
     "check:v1-ui": "node scripts/check-v1-ui.mjs",
     "check:v1-server": "node scripts/check-v1-server.mjs",
+    "check:windows-launcher": "node scripts/check-windows-launcher.mjs",
+    "check:windows-chat-ready": "node scripts/check-windows-chat-ready.mjs",
+    "check:windows-image-runtime": "node scripts/check-windows-image-runtime.mjs",
+    "check:electron": "node scripts/check-electron-client.mjs",
+    "check:electron-full": "node scripts/check-electron-full-package.mjs",
     "check:improvements": "node scripts/check-platform-improvements.mjs",
     "check:lan-proxy": "node scripts/check-lan-proxy.mjs",
     "build": "vue-tsc -b && vite build",
+    "electron:start": "electron .",
+    "electron:dev": "npm run build && npm run check:electron && electron .",
+    "electron:pack:win": "npm run build && npm run check:electron && electron-builder --win nsis --x64",
+    "electron:pack:win:full": "npm run build && npm run check:electron && electron-builder --config desktop/electron/electron-builder.full.cjs --win nsis --x64 && npm run check:electron-full",
+    "build:win": "npm run electron:pack:win",
+    "build:windows-launcher": "node scripts/build-windows-launcher.mjs",
     "preview": "vite preview",
     "serve:lan": "node scripts/serve-lan.mjs",
-    "package:lan": "npm run build && node scripts/package-lan.mjs && npm run check:image-package"
+    "package:lan": "npm run build && node scripts/package-lan.mjs && npm run check:image-package",
+    "package:windows-lite": "npm run build && npm run build:windows-launcher && node scripts/package-windows-lite.mjs && npm run check:windows-launcher",
+    "package:windows-chat-ready": "node scripts/package-windows-chat-ready.mjs && npm run check:windows-chat-ready",
+    "package:windows-image-runtime": "node scripts/package-windows-image-runtime.mjs && npm run check:windows-image-runtime"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
@@ -40,9 +58,63 @@
     "@types/node": "^26.1.1",
     "@vitejs/plugin-legacy": "^8.2.2",
     "@vitejs/plugin-vue": "^6.0.8",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "playwright-core": "^1.62.0",
     "typescript": "5.9.3",
     "vite": "^8.1.5",
     "vue-tsc": "^3.3.8"
+  },
+  "build": {
+    "appId": "com.shotai.desktop",
+    "productName": "ShotAI",
+    "asar": true,
+    "directories": {
+      "output": "release/electron",
+      "buildResources": "desktop/electron/assets"
+    },
+    "files": [
+      "desktop/electron/**/*",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "dist",
+        "to": "shotai/web"
+      },
+      {
+        "from": "scripts/serve-lan.mjs",
+        "to": "shotai/server/serve-lan.mjs"
+      },
+      {
+        "from": "lan.config.json",
+        "to": "shotai/lan.config.json"
+      }
+    ],
+    "win": {
+      "icon": "desktop/electron/assets/shotai.ico",
+      "requestedExecutionLevel": "asInvoker",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "ShotAI-${version}-Windows-${arch}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ShotAI",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "perMachine": true,
+      "include": "desktop/electron/installer.nsh"
+    }
   }
 }

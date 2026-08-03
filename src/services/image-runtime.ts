@@ -16,6 +16,8 @@ interface ImageGenerationResponse {
     url?: string
   }>
   error?: string | { message?: string }
+  detail?: string
+  images?: string[]
 }
 
 const defaultStatus: ImageRuntimeStatus = {
@@ -36,7 +38,12 @@ function getResponseError(
 ) {
   if (typeof body?.error === 'string') return body.error
   if (body?.error?.message) return body.error.message
+  if (body?.detail) return body.detail
   return fallback
+}
+
+function toGeneratedImageDataUrl(value: string, mimeType = 'image/png') {
+  return value.startsWith('data:') ? value : `data:${mimeType};base64,${value}`
 }
 
 export async function getImageRuntimeStatus(): Promise<ImageRuntimeStatus> {
@@ -213,14 +220,72 @@ export async function generateImageWithLocalRuntime(
 
   const item = body?.data?.[0]
   if (item?.b64_json) {
-    return {
-      dataUrl: item.b64_json.startsWith('data:')
-        ? item.b64_json
-        : `data:image/png;base64,${item.b64_json}`,
-    }
+    return { dataUrl: toGeneratedImageDataUrl(item.b64_json) }
   }
   if (item?.url) {
     return { dataUrl: item.url }
   }
   throw new Error('图片服务没有返回图片，请重新启动图片服务后再试')
+}
+
+export async function editImageWithLocalRuntime(
+  prompt: string,
+  sourceImage: string,
+  options: {
+    signal?: AbortSignal
+    width: number
+    height: number
+    strength: number
+    steps?: number
+    cfgScale?: number
+  },
+) {
+  let response: Response
+  try {
+    response = await fetch('/image/sdapi/v1/img2img', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt,
+        init_images: [sourceImage],
+        denoising_strength: Math.min(1, Math.max(0.05, options.strength)),
+        width: options.width,
+        height: options.height,
+        steps: options.steps ?? 8,
+        cfg_scale: options.cfgScale ?? 1,
+        seed: -1,
+        batch_size: 1,
+      }),
+      signal: options.signal,
+    })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new Error('无法连接图片修改服务，请重新启动 ShotAI')
+  }
+
+  let body: ImageGenerationResponse | undefined
+  try {
+    body = (await response.json()) as ImageGenerationResponse
+  } catch {
+    // The actionable error below also covers malformed and empty responses.
+  }
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error('当前图片运行组件版本过旧，请更新后再使用图片修改')
+    }
+    throw new Error(
+      getResponseError(body, '图片没有修改成功，请检查图片模型后重新尝试'),
+    )
+  }
+
+  const image = body?.images?.[0]
+  if (!image) {
+    throw new Error('图片服务没有返回修改后的图片，请重新尝试')
+  }
+  return { dataUrl: toGeneratedImageDataUrl(image) }
 }

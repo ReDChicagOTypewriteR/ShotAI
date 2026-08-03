@@ -12,6 +12,7 @@ const lanPort = 18080
 let receivedHeaders = null
 let receivedImageHeaders = null
 let receivedVisionImage = null
+let receivedReferenceImage = null
 
 const mockOllama = createServer(async (request, response) => {
   if (request.method === 'POST' && request.url === '/api/show') {
@@ -81,6 +82,17 @@ const mockImageRuntime = createServer(async (request, response) => {
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify({ data: [{ b64_json: 'test-image' }] }))
+    return
+  }
+
+  if (request.method === 'POST' && request.url === '/sdapi/v1/img2img') {
+    receivedImageHeaders = request.headers
+    const chunks = []
+    for await (const chunk of request) chunks.push(chunk)
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+    receivedReferenceImage = body.init_images?.[0]
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ images: ['edited-image'] }))
     return
   }
 
@@ -200,6 +212,28 @@ try {
   )
   assert.equal(receivedImageHeaders?.['x-shotai-proxy'], 'shotai-image')
 
+  const referenceImage = `data:image/jpeg;base64,${largeVisionImage}`
+  const imageEditResponse = await fetch(
+    `http://127.0.0.1:${lanPort}/image/sdapi/v1/img2img`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: `http://192.168.10.20:${lanPort}`,
+        Referer: `http://192.168.10.20:${lanPort}/`,
+      },
+      body: JSON.stringify({
+        prompt: 'edit proxy test',
+        init_images: [referenceImage],
+        denoising_strength: 0.55,
+      }),
+    },
+  )
+  assert.equal(imageEditResponse.status, 200)
+  assert.equal(receivedReferenceImage, referenceImage)
+  assert.equal(receivedImageHeaders?.origin, undefined)
+  assert.equal(receivedImageHeaders?.referer, undefined)
+
   const imageStatusResponse = await fetch(
     `http://127.0.0.1:${lanPort}/image-runtime/status`,
   )
@@ -207,7 +241,7 @@ try {
   assert.equal(imageStatus.serviceOnline, true)
 
   console.log(
-    'LAN proxy check passed: browser Origin/Referer are removed for Ollama and image generation.',
+    'LAN proxy check passed: browser Origin/Referer are removed for Ollama, image generation, and image editing.',
   )
 } finally {
   lanServer.kill('SIGTERM')

@@ -98,6 +98,7 @@ import type {
 } from './services/knowledge'
 import {
   deleteImageModelFile,
+  editImageWithLocalRuntime,
   generateImageWithLocalRuntime,
   getImageRuntimeStatus,
   restartImageRuntime,
@@ -111,6 +112,7 @@ type ViewKey = 'chat' | 'models' | 'knowledge' | 'diagnostics' | 'settings'
 type ModelStatus = 'ready' | 'sleeping' | 'checking'
 type OllamaConnectionState = 'checking' | 'online' | 'degraded' | 'offline'
 type ImageCanvas = 'square' | 'landscape' | 'portrait'
+type ComposerMode = 'chat' | 'image'
 
 interface RagSource {
   id: string
@@ -167,6 +169,9 @@ interface DemoMessage {
   attachments?: MessageAttachment[]
   modelId?: string
   modelName?: string
+  generationType?: 'chat' | 'image'
+  generationProgress?: number
+  generationStatus?: string
 }
 
 interface LocalModel {
@@ -178,6 +183,7 @@ interface LocalModel {
   quantization: string
   size: string
   context: string
+  contextTokens: number
   status: ModelStatus
   digest: string
   rawDigest: string
@@ -236,6 +242,7 @@ const imagePrompt = ref('')
 const AUTO_IMAGE_PROVIDER_ID = 'auto'
 const imageModelId = ref(AUTO_IMAGE_PROVIDER_ID)
 const imageCanvas = ref<ImageCanvas>('square')
+const imageEditStrength = ref(0.55)
 const imageGenerating = ref(false)
 const imageProgress = ref(0)
 const imageStatus = ref('')
@@ -271,6 +278,7 @@ const validationRunning = ref(false)
 const importStatus = ref('')
 const senderRef = ref<HTMLTextAreaElement | null>(null)
 const senderText = ref('')
+const composerMode = ref<ComposerMode>('chat')
 const bubbleListRef = ref<BubbleListExpose | null>(null)
 let messageScrollFrame = 0
 
@@ -343,7 +351,7 @@ let messageId = 10
 
 const MAX_IMAGE_COUNT = 4
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
-const MAX_IMAGE_DIMENSION = 2048
+const MAX_IMAGE_DIMENSION = 1536
 const IMAGE_COMPRESSION_THRESHOLD = 3 * 1024 * 1024
 const MAX_MESSAGE_ATTACHMENT_COUNT = 6
 const MAX_ATTACHMENT_TEXT_CHARS = 12_000
@@ -418,6 +426,7 @@ const emptyModel: LocalModel = {
   quantization: '—',
   size: '—',
   context: '—',
+  contextTokens: 0,
   status: 'checking',
   digest: '—',
   rawDigest: '',
@@ -865,11 +874,15 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '发生未知错误'
 }
 
-function getContextLabel(show?: OllamaShowResponse) {
+function getModelContextTokens(show?: OllamaShowResponse) {
   const entry = Object.entries(show?.model_info ?? {}).find(([key]) =>
     key.endsWith('.context_length'),
   )
-  const value = typeof entry?.[1] === 'number' ? entry[1] : 0
+  return typeof entry?.[1] === 'number' ? entry[1] : 0
+}
+
+function getContextLabel(show?: OllamaShowResponse) {
+  const value = getModelContextTokens(show)
   if (!value) return '默认'
   return value >= 1024 ? `${Math.round(value / 1024)}K` : `${value}`
 }
@@ -1107,6 +1120,7 @@ async function mapOllamaModel(
         '未知',
       size: formatModelSize(model.size),
       context: getContextLabel(show),
+      contextTokens: getModelContextTokens(show),
       status: runningIds.has(modelId) ? 'ready' : 'sleeping',
       digest: formatDigest(model.digest),
       rawDigest: model.digest,
@@ -1743,6 +1757,36 @@ function pendingFileCount() {
 
 async function addMessageFiles(files: File[]) {
   if (attachmentProcessing.value) return
+  if (composerMode.value === 'image') {
+    if (!selectLocalImageEditProvider()) {
+      ElMessage.warning('这台主机还没有准备可以修改图片的本地组件')
+      openImageStudio()
+      return
+    }
+    const imageFile = files.find((file) => file.type.startsWith('image/'))
+    if (!imageFile) {
+      ElMessage.warning('图片修改只能添加一张 JPG、PNG 或 WebP 图片')
+      return
+    }
+    if (files.filter((file) => file.type.startsWith('image/')).length > 1) {
+      ElMessage.warning('图片修改一次只能使用一张参考图，已选择第一张')
+    }
+    attachmentProcessing.value = true
+    try {
+      const preparedImage = await prepareMessageImage(imageFile)
+      pendingImages.value = [preparedImage]
+      pendingAttachments.value = []
+      const ratio = preparedImage.width / preparedImage.height
+      imageCanvas.value =
+        ratio > 1.15 ? 'landscape' : ratio < 0.87 ? 'portrait' : 'square'
+      ElMessage.success('参考图已添加，请描述想要的修改')
+    } catch (error) {
+      ElMessage.error(getErrorMessage(error))
+    } finally {
+      attachmentProcessing.value = false
+    }
+    return
+  }
   const remaining = MAX_MESSAGE_ATTACHMENT_COUNT - pendingFileCount()
   if (remaining <= 0) {
     ElMessage.warning(`每条消息最多添加 ${MAX_MESSAGE_ATTACHMENT_COUNT} 个附件`)
@@ -2012,6 +2056,82 @@ async function clearGeneratedImageHistory() {
   ElMessage.success('图片历史已清空')
 }
 
+async function requestGeneratedImage(
+  prompt: string,
+  provider: ImageProviderOption,
+  canvas: (typeof imageCanvasOptions)[number],
+  signal: AbortSignal,
+  update: (progress: number, status: string) => void,
+  edit?: { source: MessageImage; strength: number },
+) {
+  if (provider.kind === 'local-runtime') {
+    let currentProgress = 5
+    const runningStatus = edit
+      ? '正在参考原图进行修改，第一次会稍慢'
+      : '正在载入并绘制，第一次会稍慢'
+    update(currentProgress, runningStatus)
+    imageProgressTimer = window.setInterval(() => {
+      currentProgress = Math.min(
+        90,
+        currentProgress +
+          Math.max(1, Math.round((92 - currentProgress) / 12)),
+      )
+      update(currentProgress, runningStatus)
+    }, 800)
+    if (edit) {
+      return editImageWithLocalRuntime(prompt, edit.source.dataUrl, {
+        signal,
+        width: canvas.width,
+        height: canvas.height,
+        strength: edit.strength,
+        steps: /z.?image/i.test(provider.modelId) ? 8 : 12,
+        cfgScale: 1,
+      })
+    }
+    return generateImageWithLocalRuntime(prompt, {
+      signal,
+      width: canvas.width,
+      height: canvas.height,
+      steps: /z.?image/i.test(provider.modelId) ? 8 : 4,
+      cfgScale: 1,
+      model: provider.modelId,
+    })
+  }
+
+  return generateImageWithOllama(provider.modelId, prompt, {
+    signal,
+    width: canvas.width,
+    height: canvas.height,
+    onProgress: (completed, total) => {
+      const progress = total
+        ? Math.min(98, Math.max(3, Math.round((completed / total) * 100)))
+        : imageProgress.value
+      update(
+        progress,
+        total ? `正在绘制 · ${completed} / ${total}` : '正在绘制',
+      )
+    },
+  })
+}
+
+async function rememberGeneratedImage(
+  prompt: string,
+  model: string,
+  canvas: ImageCanvas,
+  dataUrl: string,
+) {
+  imageHistory.value.unshift({
+    id: `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    dataUrl,
+    prompt,
+    model,
+    canvas,
+    createdAt: Date.now(),
+  })
+  imageHistory.value = imageHistory.value.slice(0, 12)
+  await persistImageHistory()
+}
+
 async function createImage() {
   const prompt = imagePrompt.value.trim()
   if (!prompt) {
@@ -2032,51 +2152,24 @@ async function createImage() {
 
   try {
     const canvas = selectedImageCanvas.value
-    let result: { dataUrl: string }
-    if (provider.kind === 'local-runtime') {
-      imageStatus.value = '正在载入并绘制，第一次会稍慢'
-      imageProgress.value = 5
-      imageProgressTimer = window.setInterval(() => {
-        imageProgress.value = Math.min(
-          90,
-          imageProgress.value + Math.max(1, Math.round((92 - imageProgress.value) / 12)),
-        )
-      }, 800)
-      result = await generateImageWithLocalRuntime(prompt, {
-        signal: imageController.signal,
-        width: canvas.width,
-        height: canvas.height,
-        steps: /z.?image/i.test(provider.modelId) ? 8 : 4,
-        cfgScale: 1,
-        model: provider.modelId,
-      })
-    } else {
-      result = await generateImageWithOllama(provider.modelId, prompt, {
-        signal: imageController.signal,
-        width: canvas.width,
-        height: canvas.height,
-        onProgress: (completed, total) => {
-          imageProgress.value = total
-            ? Math.min(98, Math.max(3, Math.round((completed / total) * 100)))
-            : imageProgress.value
-          imageStatus.value = total
-            ? `正在绘制 · ${completed} / ${total}`
-            : '正在绘制'
-        },
-      })
-    }
+    const result = await requestGeneratedImage(
+      prompt,
+      provider,
+      canvas,
+      imageController.signal,
+      (progress, status) => {
+        imageProgress.value = progress
+        imageStatus.value = status
+      },
+    )
     generatedImageUrl.value = result.dataUrl
     generatedImageModel.value = provider.label
-    imageHistory.value.unshift({
-      id: `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      dataUrl: result.dataUrl,
+    await rememberGeneratedImage(
       prompt,
-      model: provider.label,
-      canvas: imageCanvas.value,
-      createdAt: Date.now(),
-    })
-    imageHistory.value = imageHistory.value.slice(0, 12)
-    await persistImageHistory()
+      provider.label,
+      imageCanvas.value,
+      result.dataUrl,
+    )
     imageProgress.value = 100
     imageStatus.value = '图片已生成'
     ElMessage.success('图片已生成')
@@ -2119,6 +2212,203 @@ function downloadGeneratedImage() {
   ElMessage.success('图片已保存')
 }
 
+function useImageComposer() {
+  if (!selectedImageProvider.value) {
+    ElMessage.warning('请先准备图片运行组件和模型文件')
+    openImageStudio()
+    return
+  }
+  if (pendingAttachments.value.length) {
+    ElMessage.warning('图片创作不能使用文档，请先移除已添加的文档')
+    return
+  }
+  if (pendingImages.value.length > 1) {
+    ElMessage.warning('图片修改一次只能使用一张参考图，请先移除多余图片')
+    return
+  }
+  if (pendingImages.value.length && !selectLocalImageEditProvider()) {
+    ElMessage.warning('这台主机还没有准备可以修改图片的本地组件')
+    openImageStudio()
+    return
+  }
+  composerMode.value = 'image'
+  imageStudioOpen.value = false
+  void nextTick(() => {
+    resizeComposer()
+    focusSenderEnd()
+  })
+}
+
+function selectLocalImageEditProvider() {
+  const localProvider = imageProviderOptions.value.find(
+    (provider) => provider.kind === 'local-runtime',
+  )
+  if (!localProvider) return false
+  imageModelId.value = localProvider.id
+  return true
+}
+
+function leaveImageComposer() {
+  if (isGenerating.value) return
+  composerMode.value = 'chat'
+  void nextTick(focusSenderEnd)
+}
+
+function dataUrlSize(dataUrl: string) {
+  const payload = dataUrl.slice(dataUrl.indexOf(',') + 1).replace(/\s+/g, '')
+  return Math.max(0, Math.floor((payload.length * 3) / 4))
+}
+
+async function createImageInConversation() {
+  const prompt = senderText.value.trim()
+  if (!prompt) {
+    ElMessage.warning('请先写下想要的画面')
+    return
+  }
+  if (pendingAttachments.value.length) {
+    ElMessage.warning('图片创作不能使用文档，请先移除文档附件')
+    return
+  }
+  if (pendingImages.value.length > 1) {
+    ElMessage.warning('图片修改一次只能使用一张参考图')
+    return
+  }
+  const referenceImage = pendingImages.value[0]
+  const provider = selectedImageProvider.value
+  if (!provider) {
+    ElMessage.warning('请先准备图片模型')
+    openImageStudio()
+    return
+  }
+  if (referenceImage && provider.kind !== 'local-runtime') {
+    ElMessage.warning('图片修改需要使用本地图片组件，请在图片设置中选择本地模型')
+    openImageStudio()
+    return
+  }
+  const conversation = activeConversationRecord.value
+  if (!conversation || imageGenerating.value || isGenerating.value) return
+
+  const isFirstUserMessage = conversation.messages.every(
+    (message) => message.role !== 'user',
+  )
+  conversation.messages.push({
+    id: ++messageId,
+    role: 'user',
+    placement: 'end',
+    variant: 'filled',
+    content: prompt,
+    time: nowTime(),
+    images: referenceImage ? [{ ...referenceImage }] : undefined,
+    generationType: 'image',
+  })
+  if (isFirstUserMessage && conversation.label === '新的离线对话') {
+    conversation.label = `图片创作：${prompt}`.replace(/\s+/g, ' ').slice(0, 28)
+  }
+  const assistantMessage = reactive<DemoMessage>({
+    id: ++messageId,
+    role: 'assistant',
+    placement: 'start',
+    variant: 'borderless',
+    content: '',
+    time: nowTime(),
+    loading: true,
+    modelName: provider.label,
+    generationType: 'image',
+    generationProgress: 2,
+    generationStatus: '正在准备图片模型',
+  })
+  conversation.messages = [...conversation.messages, assistantMessage]
+  conversation.updatedAt = Date.now()
+  senderText.value = ''
+  void nextTick(resizeComposer)
+  isGenerating.value = true
+  isStopping.value = false
+  imageGenerating.value = true
+  imageProgress.value = 2
+  imageStatus.value = assistantMessage.generationStatus ?? ''
+  imageController = new AbortController()
+  const controller = imageController
+  await nextTick()
+  scrollMessagesToBottom(true)
+
+  try {
+    const canvas = selectedImageCanvas.value
+    const result = await requestGeneratedImage(
+      prompt,
+      provider,
+      canvas,
+      controller.signal,
+      (progress, status) => {
+        assistantMessage.generationProgress = progress
+        assistantMessage.generationStatus = status
+        imageProgress.value = progress
+        imageStatus.value = status
+        if (isMessageScrollerNearBottom()) scrollMessagesToBottom()
+      },
+      referenceImage
+        ? { source: referenceImage, strength: imageEditStrength.value }
+        : undefined,
+    )
+    const generatedImage: MessageImage = {
+      id: `generated-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: `ShotAI-${Date.now()}.png`,
+      mimeType: 'image/png',
+      dataUrl: result.dataUrl,
+      width: canvas.width,
+      height: canvas.height,
+      size: dataUrlSize(result.dataUrl),
+    }
+    assistantMessage.images = [generatedImage]
+    assistantMessage.content = referenceImage
+      ? '图片已根据参考图和你的描述在本地修改。'
+      : '图片已根据你的描述在本地生成。'
+    assistantMessage.generationProgress = 100
+    assistantMessage.generationStatus = '图片已生成'
+    generatedImageUrl.value = result.dataUrl
+    generatedImageModel.value = provider.label
+    await rememberGeneratedImage(
+      prompt,
+      provider.label,
+      imageCanvas.value,
+      result.dataUrl,
+    )
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      assistantMessage.stopped = true
+      assistantMessage.content = '已停止图片生成。'
+      assistantMessage.generationStatus = '已停止'
+      return
+    }
+    const message = getImageGenerationError(error)
+    assistantMessage.content = `图片生成失败：${message}`
+    assistantMessage.generationStatus = '生成失败'
+    ElMessage.error(message)
+  } finally {
+    if (imageProgressTimer) {
+      window.clearInterval(imageProgressTimer)
+      imageProgressTimer = undefined
+    }
+    assistantMessage.loading = false
+    conversation.updatedAt = Date.now()
+    if (imageController === controller) imageController = undefined
+    imageGenerating.value = false
+    isGenerating.value = false
+    isStopping.value = false
+    scheduleWorkspaceSave()
+    scrollMessagesToBottom()
+  }
+}
+
+function downloadMessageImage(image: MessageImage) {
+  const link = document.createElement('a')
+  link.href = image.dataUrl
+  link.download = image.name || `ShotAI-${Date.now()}.png`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  ElMessage.success('图片已保存')
+}
+
 function handleComposerResourceAction(command: string | number | object) {
   if (command === 'attachment') {
     openAttachmentPicker()
@@ -2129,7 +2419,7 @@ function handleComposerResourceAction(command: string | number | object) {
     return
   }
   if (command === 'image-generation') {
-    openImageStudio()
+    useImageComposer()
     return
   }
   if (command === 'models') {
@@ -2227,6 +2517,34 @@ function createOllamaMessageContent(
     ].join('\n\n'),
     usedAttachmentCharacters,
   }
+}
+
+function estimateTextTokens(content: string) {
+  const cjkCount = (content.match(/[\u3400-\u9fff\uf900-\ufaff]/g) ?? []).length
+  const otherCount = Math.max(0, content.length - cjkCount)
+  return Math.ceil(cjkCount * 1.15 + otherCount / 3.5) + 12
+}
+
+function estimateImageTokens(images?: MessageImage[]) {
+  return (images ?? []).reduce(
+    (total, image) =>
+      total + Math.max(256, Math.ceil((image.width * image.height) / 784)),
+    0,
+  )
+}
+
+function getEffectiveContextLength(
+  model: LocalModel,
+  configuredLength: number,
+  visionImageCount: number,
+) {
+  const minimumForVision = visionImageCount > 1 ? 16_384 : 8_192
+  const requested = visionImageCount
+    ? Math.max(configuredLength, minimumForVision)
+    : configuredLength
+  return model.contextTokens > 0
+    ? Math.min(requested, model.contextTokens)
+    : requested
 }
 
 async function createNewKnowledgeBase() {
@@ -2530,7 +2848,19 @@ function createRagSystemMessage(results: RetrievedKnowledge[]) {
 }
 
 function stopGeneration() {
-  if (!chatController || isStopping.value) return
+  if (isStopping.value) return
+  if (imageController && isGenerating.value) {
+    isStopping.value = true
+    imageStatus.value = '正在停止'
+    const last = messages.value[messages.value.length - 1]
+    if (last?.role === 'assistant') {
+      last.stopped = true
+      last.generationStatus = '正在停止'
+    }
+    imageController.abort()
+    return
+  }
+  if (!chatController) return
   isStopping.value = true
   chatController?.abort()
   const last = messages.value[messages.value.length - 1]
@@ -2562,10 +2892,10 @@ async function generateAssistantResponse() {
   if (isGenerating.value || !ensureChatReady()) return
   const conversation = activeConversationRecord.value
   if (!conversation) return
-  const latestUserMessage = [...conversation.messages]
+  const visionSourceMessage = [...conversation.messages]
     .reverse()
-    .find((message) => message.role === 'user')
-  const needsVision = Boolean(latestUserMessage?.images?.length)
+    .find((message) => message.role === 'user' && message.images?.length)
+  const needsVision = Boolean(visionSourceMessage?.images?.length)
   const routedVisionModel = needsVision ? preferredVisionModel.value : undefined
   const modelId = routedVisionModel?.id ?? currentModelId.value
   const model = models.find((item) => item.id === modelId) ?? emptyModel
@@ -2594,6 +2924,7 @@ async function generateAssistantResponse() {
     loading: true,
     modelId: model.id,
     modelName: model.name,
+    generationType: 'chat',
   })
   conversation.messages.push(assistantMessage)
   conversation.updatedAt = Date.now()
@@ -2622,38 +2953,41 @@ async function generateAssistantResponse() {
   const chatMessages = conversation.messages.filter(
     (message) => message.id !== assistantMessage.id && message.content,
   )
+  const visionImages = supportsVision ? visionSourceMessage?.images ?? [] : []
+  const effectiveContextLength = getEffectiveContextLength(
+    model,
+    conversation.settings.contextLength,
+    visionImages.length,
+  )
   let attachmentCharacterBudget = Math.max(
     3_000,
-    Math.min(18_000, Math.floor(conversation.settings.contextLength * 1.75)),
+    Math.min(18_000, Math.floor(effectiveContextLength * 1.25)),
   )
-  const history: OllamaChatMessage[] = [...chatMessages]
-    .reverse()
-    .map((message) => {
-      const attachmentContent = createOllamaMessageContent(
-        message,
-        attachmentCharacterBudget,
-      )
-      attachmentCharacterBudget = Math.max(
-        0,
-        attachmentCharacterBudget -
-          attachmentContent.usedAttachmentCharacters,
-      )
-      return {
-        role: message.role,
-        content: attachmentContent.content,
-        ...(supportsVision && message.images?.length
-          ? {
-              images: message.images.map((image) =>
-                toOllamaImage(image.dataUrl),
-              ),
-            }
-          : {}),
-        ...(shouldShowReasoning && message.reasoning
-          ? { thinking: message.reasoning }
-          : {}),
-      }
-    })
-    .reverse()
+  const preparedMessages = chatMessages.map((message) => {
+    const attachmentContent = createOllamaMessageContent(
+      message,
+      attachmentCharacterBudget,
+    )
+    attachmentCharacterBudget = Math.max(
+      0,
+      attachmentCharacterBudget - attachmentContent.usedAttachmentCharacters,
+    )
+    const images =
+      supportsVision &&
+      message.role === 'user' &&
+      message.id === visionSourceMessage?.id
+        ? message.images
+        : undefined
+    return {
+      id: message.id,
+      role: message.role,
+      content: attachmentContent.content,
+      images,
+      ...(shouldShowReasoning && message.reasoning
+        ? { thinking: message.reasoning }
+        : {}),
+    }
+  })
   const systemMessages: OllamaChatMessage[] = []
   if (conversation.systemPrompt.trim()) {
     systemMessages.push({
@@ -2668,11 +3002,50 @@ async function generateAssistantResponse() {
       content: ragSystemMessage,
     })
   }
-  history.unshift(...systemMessages)
+  const reservedOutputTokens = Math.min(
+    1_024,
+    Math.max(512, Math.floor(effectiveContextLength * 0.2)),
+  )
+  const promptTokenBudget = Math.max(
+    1_024,
+    effectiveContextLength - reservedOutputTokens - 256,
+  )
+  let usedPromptTokens = systemMessages.reduce(
+    (total, message) => total + estimateTextTokens(message.content),
+    0,
+  )
+  const selectedPreparedMessages: typeof preparedMessages = []
+  const latestPreparedMessage = preparedMessages.at(-1)
+  for (const message of [...preparedMessages].reverse()) {
+    const messageTokens =
+      estimateTextTokens(message.content) + estimateImageTokens(message.images)
+    const required =
+      message.id === latestPreparedMessage?.id ||
+      message.id === visionSourceMessage?.id
+    if (required || usedPromptTokens + messageTokens <= promptTokenBudget) {
+      selectedPreparedMessages.unshift(message)
+      usedPromptTokens += messageTokens
+    }
+  }
+  const history: OllamaChatMessage[] = [
+    ...systemMessages,
+    ...selectedPreparedMessages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      ...(message.images?.length
+        ? {
+            images: message.images.map((image) =>
+              toOllamaImage(image.dataUrl),
+            ),
+          }
+        : {}),
+      ...(message.thinking ? { thinking: message.thinking } : {}),
+    })),
+  ]
   const generation: OllamaGenerationOptions = {
     temperature: conversation.settings.temperature,
     top_p: conversation.settings.topP,
-    num_ctx: conversation.settings.contextLength,
+    num_ctx: effectiveContextLength,
     num_predict: conversation.settings.maxOutput,
   }
 
@@ -2737,6 +3110,10 @@ async function generateAssistantResponse() {
 
 async function handleSubmit() {
   if (isGenerating.value) return
+  if (composerMode.value === 'image') {
+    await createImageInConversation()
+    return
+  }
   const input = senderText.value.trim()
   const submittedImages = pendingImages.value.map((image) => ({ ...image }))
   const submittedAttachments = pendingAttachments.value.map((attachment) => ({
@@ -3335,6 +3712,36 @@ onBeforeUnmount(() => {
                   </span>
                 </div>
               </template>
+              <template #loading="{ item }">
+                <div
+                  v-if="item.generationType === 'image'"
+                  class="inline-image-generating"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div class="image-generation-visual" aria-hidden="true">
+                    <span class="image-generation-frame"></span>
+                    <span class="image-generation-scan"></span>
+                    <el-icon><MagicStick /></el-icon>
+                  </div>
+                  <div class="inline-image-generation-copy">
+                    <span>{{ item.generationStatus || '正在生成图片' }}</span>
+                    <strong>{{ item.generationProgress || 0 }}%</strong>
+                  </div>
+                  <div class="inline-image-progress" aria-hidden="true">
+                    <span
+                      :style="{
+                        transform: `scaleX(${(item.generationProgress || 0) / 100})`,
+                      }"
+                    ></span>
+                  </div>
+                  <small>图片全程在运行 ShotAI 的电脑上生成</small>
+                </div>
+                <div v-else class="typing-state" aria-live="polite">
+                  <span></span><span></span><span></span>
+                  正在准备回答
+                </div>
+              </template>
               <template #content="{ item }">
                 <div
                   class="message-content"
@@ -3431,14 +3838,6 @@ onBeforeUnmount(() => {
                     </el-button>
                   </div>
                   <div
-                    v-if="item.loading && !item.content"
-                    class="typing-state"
-                    aria-live="polite"
-                  >
-                    <span></span><span></span><span></span>
-                    正在准备回答
-                  </div>
-                  <div
                     v-if="item.sources?.length"
                     class="message-sources"
                     aria-label="回答参考的资料"
@@ -3508,6 +3907,17 @@ onBeforeUnmount(() => {
                   </template>
                   <template v-if="item.role === 'assistant' && item.content">
                     <el-button
+                      v-if="item.generationType === 'image' && item.images?.[0]"
+                      text
+                      size="small"
+                      aria-label="保存生成的图片"
+                      @click="downloadMessageImage(item.images[0])"
+                    >
+                      <el-icon><Download /></el-icon>
+                      保存图片
+                    </el-button>
+                    <el-button
+                      v-if="item.generationType !== 'image'"
                       text
                       size="small"
                       aria-label="复制回答"
@@ -3518,6 +3928,7 @@ onBeforeUnmount(() => {
                     </el-button>
                     <el-button
                       v-if="
+                        item.generationType !== 'image' &&
                         item.id === latestAssistantId &&
                         messages.some((message) => message.role === 'user')
                       "
@@ -3612,21 +4023,34 @@ onBeforeUnmount(() => {
               ref="attachmentInputRef"
               class="visually-hidden-input"
               type="file"
-              accept="image/jpeg,image/png,image/webp,.txt,.md,.markdown,.pdf,.doc,.docx"
-              multiple
+              :accept="
+                composerMode === 'image'
+                  ? 'image/jpeg,image/png,image/webp'
+                  : 'image/jpeg,image/png,image/webp,.txt,.md,.markdown,.pdf,.doc,.docx'
+              "
+              :multiple="composerMode !== 'image'"
               tabindex="-1"
               @change="handleAttachmentInput"
             />
             <div v-if="attachmentDragActive" class="image-drop-overlay">
               <el-icon><Paperclip /></el-icon>
-              <strong>松开鼠标即可添加</strong>
-              <span>支持常见图片、文本、PDF 和 Word 文件</span>
+              <strong>
+                {{ composerMode === 'image' ? '松开即可设为参考图' : '松开鼠标即可添加' }}
+              </strong>
+              <span>
+                {{
+                  composerMode === 'image'
+                    ? '支持 JPG、PNG 和 WebP，一次使用一张'
+                    : '支持常见图片、文本、PDF 和 Word 文件'
+                }}
+              </span>
             </div>
             <div
               v-if="
-                pendingImages.length ||
-                pendingAttachments.length ||
-                attachmentProcessing
+                composerMode !== 'image' &&
+                (pendingImages.length ||
+                  pendingAttachments.length ||
+                  attachmentProcessing)
               "
               class="image-attachment-tray"
               aria-live="polite"
@@ -3729,6 +4153,102 @@ onBeforeUnmount(() => {
                 还没有可以识别图片的模型，请先添加一个再发送。
               </div>
             </div>
+            <div
+              v-if="composerMode === 'image'"
+              class="composer-mode-strip"
+              aria-label="图片创作模式"
+            >
+              <div class="composer-mode-title">
+                <span><el-icon><MagicStick /></el-icon></span>
+                <div>
+                  <strong>图片创作</strong>
+                  <small>
+                    {{
+                      pendingImages.length
+                        ? `参考图修改 · ${selectedImageProvider?.label}`
+                        : `文字生成 · ${selectedImageProvider?.label}`
+                    }}
+                  </small>
+                </div>
+              </div>
+              <div class="composer-canvas-options" aria-label="图片形状">
+                <button
+                  v-for="option in imageCanvasOptions"
+                  :key="option.id"
+                  type="button"
+                  :class="{ 'is-selected': imageCanvas === option.id }"
+                  :aria-pressed="imageCanvas === option.id"
+                  :disabled="isGenerating"
+                  @click="imageCanvas = option.id"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+              <button
+                class="composer-mode-close"
+                type="button"
+                aria-label="退出图片创作模式"
+                :disabled="isGenerating"
+                @click="leaveImageComposer"
+              >
+                <el-icon><CloseBold /></el-icon>
+              </button>
+              <div
+                v-if="pendingImages[0]"
+                class="composer-reference-editor"
+                aria-label="图片修改设置"
+              >
+                <el-image
+                  class="composer-reference-image"
+                  :src="pendingImages[0].dataUrl"
+                  :alt="`参考图：${pendingImages[0].name}`"
+                  :preview-src-list="[pendingImages[0].dataUrl]"
+                  preview-teleported
+                  fit="cover"
+                />
+                <div class="composer-reference-copy">
+                  <strong>参考图</strong>
+                  <small>
+                    {{ pendingImages[0].width }}×{{ pendingImages[0].height }} · 修改后仍保留原图
+                  </small>
+                </div>
+                <label class="composer-strength-control">
+                  <span>
+                    改动幅度
+                    <strong>{{ Math.round(imageEditStrength * 100) }}%</strong>
+                  </span>
+                  <input
+                    v-model.number="imageEditStrength"
+                    type="range"
+                    min="0.1"
+                    max="0.95"
+                    step="0.05"
+                    :disabled="isGenerating"
+                    aria-label="图片改动幅度"
+                  />
+                  <small><span>更像原图</span><span>变化更多</span></small>
+                </label>
+                <button
+                  class="composer-reference-remove"
+                  type="button"
+                  :disabled="isGenerating"
+                  :aria-label="`移除参考图 ${pendingImages[0].name}`"
+                  @click="removePendingImage(pendingImages[0].id)"
+                >
+                  <el-icon><Delete /></el-icon>
+                </button>
+              </div>
+              <button
+                v-else
+                class="composer-reference-add"
+                type="button"
+                :disabled="isGenerating || attachmentProcessing"
+                @click="openAttachmentPicker"
+              >
+                <el-icon><Picture /></el-icon>
+                添加参考图进行修改
+              </button>
+            </div>
             <div class="composer-input">
               <div class="sender-prefix-actions">
                 <el-dropdown
@@ -3754,7 +4274,7 @@ onBeforeUnmount(() => {
                         "
                       >
                         <el-icon><Paperclip /></el-icon>
-                        上传图片或文档
+                        {{ composerMode === 'image' ? '添加参考图' : '上传图片或文档' }}
                       </el-dropdown-item>
                       <el-dropdown-item command="knowledge">
                         <el-icon><FolderOpened /></el-icon>
@@ -3778,8 +4298,14 @@ onBeforeUnmount(() => {
                 class="composer-textarea"
                 rows="1"
                 maxlength="8000"
-                aria-label="输入问题"
-                placeholder="输入问题，按 Enter 发送，Shift + Enter 换行"
+                :aria-label="composerMode === 'image' ? '描述想要的画面' : '输入问题'"
+                :placeholder="
+                  composerMode === 'image'
+                    ? pendingImages.length
+                      ? '描述想怎样修改这张图，按 Enter 开始'
+                      : '描述想要的画面，按 Enter 开始生成'
+                    : '输入问题，按 Enter 发送，Shift + Enter 换行'
+                "
                 @input="resizeComposer"
                 @keydown="handleComposerKeydown"
                 @paste="handleComposerPaste"
@@ -3791,7 +4317,9 @@ onBeforeUnmount(() => {
                       ? isStopping
                         ? '正在停止生成'
                         : '停止生成（Esc）'
-                      : '发送消息（Enter）'
+                      : composerMode === 'image'
+                        ? '生成图片（Enter）'
+                        : '发送消息（Enter）'
                   "
                   placement="top"
                 >
@@ -3813,10 +4341,20 @@ onBeforeUnmount(() => {
               <span>
                 <template v-if="isGenerating">
                   <span class="generation-pulse"></span>
-                  {{ isStopping ? '正在停止' : '正在生成 · ESC 可停止' }}
+                  {{
+                    isStopping
+                      ? '正在停止'
+                      : composerMode === 'image'
+                        ? '正在生成图片 · ESC 可停止'
+                        : '正在生成 · ESC 可停止'
+                  }}
                 </template>
                 <template v-else>
-                  {{ persistenceLabel }}
+                  {{
+                    composerMode === 'image'
+                      ? '图片将在本地生成'
+                      : persistenceLabel
+                  }}
                 </template>
               </span>
               <span>{{ senderTextLength.toLocaleString() }} / 8,000</span>

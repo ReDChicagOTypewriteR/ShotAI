@@ -4675,6 +4675,370 @@ button {
   line-height: 1.6;
 }
 
+.inline-image-generating {
+  display: grid;
+  width: min(460px, 70vw);
+  gap: 12px;
+}
+
+.image-generation-visual {
+  position: relative;
+  display: grid;
+  height: 150px;
+  overflow: hidden;
+  place-items: center;
+  color: var(--text);
+  background:
+    linear-gradient(135deg, transparent 0 48%, rgba(255, 255, 255, 0.035) 48% 52%, transparent 52%),
+    var(--surface-soft);
+  border: 1px solid var(--border-strong);
+}
+
+.image-generation-visual > .el-icon {
+  z-index: 2;
+  font-size: 26px;
+  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--text) 34%, transparent));
+  animation: image-generation-breathe 1.8s ease-in-out infinite;
+}
+
+.image-generation-frame {
+  position: absolute;
+  width: 92px;
+  height: 92px;
+  border: 1px solid var(--border-strong);
+  transform: rotate(45deg);
+  animation: image-generation-frame 2.4s ease-in-out infinite;
+}
+
+.image-generation-scan {
+  position: absolute;
+  z-index: 1;
+  right: 10%;
+  left: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--text), transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--text) 42%, transparent);
+  animation: image-generation-scan 2s ease-in-out infinite;
+}
+
+.inline-image-generation-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.inline-image-generation-copy strong {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.inline-image-progress {
+  height: 3px;
+  overflow: hidden;
+  background: var(--surface-hover);
+}
+
+.inline-image-progress span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--text);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 260ms ease-out;
+}
+
+.inline-image-generating small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.composer-mode-strip {
+  display: grid;
+  min-height: 58px;
+  grid-template-columns: minmax(0, 1fr) auto 40px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+  padding: 8px 10px;
+  background: var(--composer);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+}
+
+.composer-mode-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.composer-mode-title > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  place-items: center;
+  color: var(--bg);
+  background: var(--signal);
+  border-radius: 10px;
+}
+
+.composer-mode-title > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.composer-mode-title strong,
+.composer-mode-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-mode-title strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.composer-mode-title small {
+  color: var(--text-muted);
+  font-size: 9px;
+}
+
+.composer-canvas-options {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.composer-canvas-options button,
+.composer-mode-close {
+  min-height: 40px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    color 180ms ease,
+    background-color 180ms ease;
+}
+
+.composer-canvas-options button {
+  padding: 0 10px;
+  font-size: 10px;
+}
+
+.composer-canvas-options button.is-selected {
+  color: var(--bg);
+  background: var(--signal);
+  font-weight: 700;
+}
+
+.composer-mode-close {
+  display: grid;
+  width: 40px;
+  place-items: center;
+}
+
+.composer-reference-editor {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 54px minmax(120px, 0.7fr) minmax(220px, 1.3fr) 40px;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.composer-reference-image {
+  width: 54px;
+  height: 54px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+}
+
+.composer-reference-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.composer-reference-copy strong {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.composer-reference-copy small {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-strength-control {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.composer-strength-control > span,
+.composer-strength-control > small {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.composer-strength-control > span {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.composer-strength-control > span strong {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.composer-strength-control > small {
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.composer-strength-control input {
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--signal);
+}
+
+.composer-strength-control input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.composer-reference-remove {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.composer-reference-remove:hover:not(:disabled),
+.composer-reference-remove:focus-visible {
+  color: var(--danger);
+  background: var(--surface-hover);
+  outline: 2px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  outline-offset: 1px;
+}
+
+.composer-reference-add {
+  display: inline-flex;
+  min-height: 40px;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  background: var(--surface-soft);
+  border: 1px dashed var(--border-strong);
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.composer-reference-add:hover:not(:disabled),
+.composer-reference-add:focus-visible {
+  color: var(--text);
+  background: var(--surface-hover);
+  outline: 2px solid color-mix(in srgb, var(--focus-ring) 38%, transparent);
+  outline-offset: 1px;
+}
+
+.composer-reference-add:disabled,
+.composer-reference-remove:disabled,
+.composer-strength-control input:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.composer-mode-close:hover:not(:disabled),
+.composer-mode-close:focus-visible,
+.composer-canvas-options button:hover:not(:disabled),
+.composer-canvas-options button:focus-visible {
+  color: var(--text);
+  background: var(--surface-hover);
+  outline: 2px solid color-mix(in srgb, var(--focus-ring) 38%, transparent);
+  outline-offset: 1px;
+}
+
+.composer-canvas-options button.is-selected:hover,
+.composer-canvas-options button.is-selected:focus-visible {
+  color: var(--bg);
+  background: var(--signal);
+}
+
+.composer-mode-strip button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+@keyframes image-generation-scan {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(-54px);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(54px);
+  }
+}
+
+@keyframes image-generation-frame {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: rotate(45deg) scale(0.88);
+  }
+  50% {
+    opacity: 0.9;
+    transform: rotate(45deg) scale(1);
+  }
+}
+
+@keyframes image-generation-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

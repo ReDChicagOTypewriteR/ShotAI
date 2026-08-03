@@ -20,11 +20,17 @@ const projectDirectory =
   scriptDirectory.endsWith(`${process.platform === 'win32' ? '\\' : '/'}scripts`)
     ? dirname(scriptDirectory)
     : scriptDirectory
+const dataDirectory = process.env.SHOTAI_DATA_ROOT
+  ? resolve(process.env.SHOTAI_DATA_ROOT)
+  : projectDirectory
 
 const webDirectoryCandidates = [
+  process.env.SHOTAI_WEB_ROOT
+    ? resolve(process.env.SHOTAI_WEB_ROOT)
+    : '',
   join(scriptDirectory, 'web'),
   join(projectDirectory, 'dist'),
-]
+].filter(Boolean)
 const webDirectory = webDirectoryCandidates.find((candidate) =>
   existsSync(join(candidate, 'index.html')),
 )
@@ -35,9 +41,12 @@ if (!webDirectory) {
 }
 
 const configCandidates = [
+  process.env.SHOTAI_CONFIG_PATH
+    ? resolve(process.env.SHOTAI_CONFIG_PATH)
+    : '',
   join(scriptDirectory, 'lan.config.json'),
   join(projectDirectory, 'lan.config.json'),
-]
+].filter(Boolean)
 const configPath = configCandidates.find((candidate) => existsSync(candidate))
 const fileConfig = configPath
   ? JSON.parse(readFileSync(configPath, 'utf8'))
@@ -56,9 +65,13 @@ const imageRuntimeUrl = new URL(
     imageRuntimeConfig.url ||
     'http://127.0.0.1:1234',
 )
-const imageModelDirectory = join(projectDirectory, 'models', 'image')
-const imageRuntimeDirectory = join(projectDirectory, 'runtime', 'image')
-const releaseVersion = fileConfig.version || '1.0.0'
+const imageModelDirectory = process.env.SHOTAI_IMAGE_MODEL_DIRECTORY
+  ? resolve(process.env.SHOTAI_IMAGE_MODEL_DIRECTORY)
+  : join(dataDirectory, 'models', 'image')
+const imageRuntimeDirectory = process.env.SHOTAI_IMAGE_RUNTIME_DIRECTORY
+  ? resolve(process.env.SHOTAI_IMAGE_RUNTIME_DIRECTORY)
+  : join(dataDirectory, 'runtime', 'image')
+const releaseVersion = process.env.SHOTAI_VERSION || fileConfig.version || '1.0.0'
 const allowLanAdministration = fileConfig.allowLanAdministration === true
 const localAddresses = new Set(
   Object.values(networkInterfaces())
@@ -474,10 +487,23 @@ const server = createServer(async (request, response) => {
       respondJson(response, 403, { error: '请在运行 ShotAI 的主机上重新载入图片模型' })
       return
     }
+    const desktopRestart = globalThis.__shotaiRestartImageRuntime
+    const managedByDesktop =
+      typeof desktopRestart === 'function' || typeof process.send === 'function'
+    if (typeof desktopRestart === 'function') {
+      Promise.resolve(desktopRestart()).catch((error) => {
+        console.error(`图片服务重新载入失败：${error.message}`)
+      })
+    }
+    else if (typeof process.send === 'function') {
+      process.send({ type: 'restart-image-runtime' })
+    }
     respondJson(response, 202, {
       accepted: true,
-      restartRequired: true,
-      message: '请重新启动 ShotAI 以载入图片模型',
+      restartRequired: !managedByDesktop,
+      message: managedByDesktop
+        ? '图片服务正在重新载入'
+        : '请重新启动 ShotAI 以载入图片模型',
     })
     return
   }
@@ -499,13 +525,20 @@ const server = createServer(async (request, response) => {
   serveStatic(request, response, requestUrl)
 })
 
+const embeddedInDesktop = process.env.SHOTAI_EMBEDDED === '1'
+globalThis.__shotaiLanServer = server
+
 server.on('error', (error) => {
+  globalThis.__shotaiLanServerError = error
+  if (typeof process.send === 'function') {
+    process.send({ type: 'server-error', message: error.message, code: error.code })
+  }
   if (error.code === 'EADDRINUSE') {
     console.error(`端口 ${port} 已被占用，请修改 lan.config.json 中的 port。`)
   } else {
     console.error(error)
   }
-  process.exit(1)
+  if (!embeddedInDesktop) process.exit(1)
 })
 
 server.listen(port, host, () => {
@@ -534,11 +567,17 @@ server.listen(port, host, () => {
   console.log(`Ollama 代理：${ollamaUrl.origin}`)
   console.log('按 Ctrl+C 停止服务')
   console.log('')
+  if (typeof process.send === 'function') {
+    process.send({ type: 'server-ready', port, host })
+  }
+  globalThis.__shotaiLanServerReady = true
 })
 
 function shutdown() {
   server.close(() => process.exit(0))
 }
 
-process.on('SIGINT', shutdown)
-process.on('SIGTERM', shutdown)
+if (!embeddedInDesktop) {
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
+}

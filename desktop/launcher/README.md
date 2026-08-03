@@ -15,9 +15,12 @@
 
 ```bash
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
-  -trimpath -ldflags="-s -w -X main.version=1.1.0-preview" \
+  -trimpath -ldflags="-s -w -H=windowsgui -X main.version=1.1.0-preview.3" \
   -o ShotAI.exe ./desktop/launcher
 ```
 
-运行时输入 `O` 打开工作台、`S` 查看内网地址、`Q` 安全退出。也可以执行
-`ShotAI.exe --stop` 请求已经运行的启动器安全退出。
+`rsrc_windows_amd64.syso` 内含 ShotAI 多尺寸图标，Go 会在编译时自动写入 EXE。
+`windowsgui` 模式不会打开控制台窗口，运行信息统一写入 `logs`。
+
+再次双击会重新打开工作台，不会重复启动。执行 `ShotAI.exe --stop` 可以请求
+已经运行的启动器安全退出。

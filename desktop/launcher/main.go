@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -109,7 +107,6 @@ func main() {
 		return
 	}
 
-	setConsoleUTF8()
 	ctx, cancel := context.WithCancel(context.Background())
 	app := &launcher{
 		root:   root,
@@ -141,12 +138,12 @@ func main() {
 	app.startImageRuntime()
 	if err := app.startWebServer(); err != nil {
 		log.Printf("网页服务启动失败：%v", err)
-		fatalDialog("ShotAI 网页服务启动失败，请查看 logs/launcher.log。")
+		fatalDialog("ShotAI 网页服务启动失败：\r\n\r\n" + err.Error() +
+			"\r\n\r\n详细信息已保存到 logs\\server.log。")
 		return
 	}
 
 	app.setPhase("运行中")
-	app.printReady()
 	if !*noBrowser {
 		_ = openBrowser(app.webURL())
 	}
@@ -160,7 +157,6 @@ func main() {
 		case <-ctx.Done():
 		}
 	}()
-	go app.readConsoleCommands()
 	<-ctx.Done()
 }
 
@@ -210,7 +206,7 @@ func (app *launcher) prepareLogging() error {
 	}
 	app.logFiles = append(app.logFiles, file)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
-	log.SetOutput(io.MultiWriter(os.Stdout, file))
+	log.SetOutput(file)
 	return nil
 }
 
@@ -284,6 +280,14 @@ func (app *launcher) writePID() {
 
 func (app *launcher) configureFirewall() {
 	name := fmt.Sprintf("ShotAI LAN %d", app.config.Port)
+	check := exec.Command(
+		"netsh",
+		"advfirewall", "firewall", "show", "rule", "name="+name,
+	)
+	configureHiddenProcess(check)
+	if check.Run() == nil {
+		return
+	}
 	command := exec.Command(
 		"netsh",
 		"advfirewall", "firewall", "add", "rule",
@@ -372,8 +376,18 @@ func (app *launcher) startImageRuntime() {
 		"-ConfigPath", filepath.Join(app.root, "lan.config.json"),
 	)
 	command.Dir = app.root
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
+	imageLog, logErr := os.OpenFile(
+		filepath.Join(app.root, "logs", "image-runtime.log"),
+		os.O_CREATE|os.O_APPEND|os.O_WRONLY,
+		0644,
+	)
+	if logErr != nil {
+		log.Printf("无法创建图片服务日志：%v", logErr)
+		return
+	}
+	app.logFiles = append(app.logFiles, imageLog)
+	command.Stdout = imageLog
+	command.Stderr = imageLog
 	configureHiddenProcess(command)
 	if err := command.Run(); err != nil {
 		log.Printf("图片服务尚未就绪：%v", err)
@@ -389,8 +403,33 @@ func (app *launcher) startWebServer() error {
 	if !fileExists(filepath.Join(app.root, "web", "index.html")) {
 		return errors.New("没有找到 web/index.html")
 	}
+	serverLogPath := filepath.Join(app.root, "logs", "server.log")
+	serverLog, err := os.OpenFile(
+		serverLogPath,
+		os.O_CREATE|os.O_APPEND|os.O_WRONLY,
+		0644,
+	)
+	if err != nil {
+		return fmt.Errorf("无法创建网页服务日志：%w", err)
+	}
+	app.logFiles = append(app.logFiles, serverLog)
+	_, _ = fmt.Fprintf(
+		serverLog,
+		"\r\n[%s] ShotAI %s 正在启动网页服务\r\n",
+		time.Now().Format("2006-01-02 15:04:05"),
+		app.config.Version,
+	)
+	if !portAvailable(app.config.Port) {
+		message := fmt.Sprintf(
+			"端口 %d 已被其他程序占用。请关闭旧版 ShotAI 或占用该端口的程序后重试",
+			app.config.Port,
+		)
+		_, _ = fmt.Fprintln(serverLog, message)
+		return errors.New(message)
+	}
 	powershell, err := findPowerShell()
 	if err != nil {
+		_, _ = fmt.Fprintln(serverLog, err.Error())
 		return err
 	}
 	command := exec.Command(
@@ -400,24 +439,54 @@ func (app *launcher) startWebServer() error {
 		"-ConfigPath", filepath.Join(app.root, "lan.config.json"),
 	)
 	command.Dir = app.root
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
+	command.Stdout = serverLog
+	command.Stderr = serverLog
 	configureHiddenProcess(command)
 	if err := command.Start(); err != nil {
-		return err
+		return fmt.Errorf("无法运行网页服务：%w", err)
 	}
 	app.server = command
+	serverExit := make(chan error, 1)
 	go func() {
-		err := command.Wait()
-		if app.ctx.Err() == nil {
-			log.Printf("网页服务已停止：%v", err)
-			app.cancel()
-		}
+		serverExit <- command.Wait()
 	}()
-	if !waitForEndpoint(app.webURL()+"/shotai/system", 15*time.Second) {
-		return errors.New("端口没有在规定时间内开始响应")
+
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case exitErr := <-serverExit:
+			if exitErr == nil {
+				exitErr = errors.New("进程提前结束")
+			}
+			return fmt.Errorf(
+				"网页服务进程提前退出：%v。请查看 %s",
+				exitErr,
+				serverLogPath,
+			)
+		default:
+			if endpointOnline(app.webURL()+"/shotai/system", 2*time.Second) {
+				go func() {
+					exitErr := <-serverExit
+					if app.ctx.Err() == nil {
+						log.Printf("网页服务已停止：%v；详情见 %s", exitErr, serverLogPath)
+						app.cancel()
+					}
+				}()
+				return nil
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
 	}
-	return nil
+	return fmt.Errorf("端口 %d 在 20 秒内没有开始响应，请查看 %s", app.config.Port, serverLogPath)
+}
+
+func portAvailable(port int) bool {
+	listener, err := net.Listen("tcp4", fmt.Sprintf("0.0.0.0:%d", port))
+	if err != nil {
+		return false
+	}
+	_ = listener.Close()
+	return true
 }
 
 func (app *launcher) shutdown() {
@@ -451,37 +520,6 @@ func (app *launcher) stopImageRuntime() {
 	if err == nil && pid > 0 {
 		terminateProcessTree(pid)
 	}
-}
-
-func (app *launcher) readConsoleCommands() {
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
-		case "q", "quit", "exit", "退出":
-			app.cancel()
-			return
-		case "o", "open", "打开":
-			_ = openBrowser(app.webURL())
-		case "s", "status", "状态":
-			app.printReady()
-		default:
-			fmt.Println("输入 O 打开工作台，S 查看地址，Q 安全退出。")
-		}
-	}
-}
-
-func (app *launcher) printReady() {
-	fmt.Println()
-	fmt.Println("========================================")
-	fmt.Printf("  ShotAI %s 已启动\n", app.config.Version)
-	fmt.Printf("  本机：%s\n", app.webURL())
-	for _, address := range app.lanURLs() {
-		fmt.Printf("  内网：%s\n", address)
-	}
-	fmt.Printf("  模型：%s\n", filepath.Join(app.root, "models", "ollama"))
-	fmt.Println("  输入 O 打开工作台，S 查看地址，Q 安全退出")
-	fmt.Println("========================================")
-	fmt.Println()
 }
 
 func (app *launcher) status() statusResponse {
@@ -580,7 +618,20 @@ func waitForEndpoint(endpoint string, timeout time.Duration) bool {
 }
 
 func controlOnline(endpoint string) bool {
-	return endpointOnline(endpoint, 700*time.Millisecond)
+	client := &http.Client{Timeout: 700 * time.Millisecond}
+	response, err := client.Get(endpoint)
+	if err != nil {
+		return false
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return false
+	}
+	var status statusResponse
+	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
+		return false
+	}
+	return status.Version != "" && strings.HasPrefix(status.WebURL, "http://127.0.0.1:")
 }
 
 func postControl(endpoint string) error {

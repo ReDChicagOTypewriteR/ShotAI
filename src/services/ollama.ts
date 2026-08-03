@@ -398,15 +398,37 @@ export async function verifyGgufFile(file: File) {
   if (!file.name.toLowerCase().endsWith('.gguf')) {
     throw new OllamaApiError('请选择以 .gguf 结尾的模型文件')
   }
-  if (file.size < 4) throw new OllamaApiError('模型文件为空或已损坏')
+  if (file.size < 24) throw new OllamaApiError('模型文件不完整或已损坏')
 
-  const header = new Uint8Array(await file.slice(0, 4).arrayBuffer())
+  const headerBuffer = await file.slice(0, 24).arrayBuffer()
+  const header = new Uint8Array(headerBuffer)
   const isGguf =
     header[0] === 0x47 &&
     header[1] === 0x47 &&
     header[2] === 0x55 &&
     header[3] === 0x46
   if (!isGguf) throw new OllamaApiError('这个文件不是可用的模型文件，请重新下载')
+
+  const view = new DataView(headerBuffer)
+  const version = view.getUint32(4, true)
+  const readUint64 = (offset: number) =>
+    view.getUint32(offset, true) + view.getUint32(offset + 4, true) * 2 ** 32
+  const tensorCount = readUint64(8)
+  const metadataCount = readUint64(16)
+
+  if (version < 2 || version > 3) {
+    throw new OllamaApiError(
+      `这个模型文件使用了当前不支持的 GGUF 版本（${version}），请下载 GGUF V3 版本`,
+    )
+  }
+  if (!Number.isSafeInteger(tensorCount) || tensorCount <= 0) {
+    throw new OllamaApiError('这个模型文件没有可用的模型数据，请重新下载')
+  }
+  if (!Number.isSafeInteger(metadataCount) || metadataCount <= 0) {
+    throw new OllamaApiError(
+      '这个 GGUF 文件缺少模型说明信息，无法判断它是什么模型。它可能是旧版图片配套文件或未完整的下载，请从同一模型下载页重新获取主模型和 mmproj 配套文件。',
+    )
+  }
 }
 
 function uploadBlobWithProgress(
@@ -489,9 +511,24 @@ export async function createOllamaModel(
     throw new OllamaApiError(await parseError(response), response.status)
   }
 
-  await consumeNdjson<CreateChunk>(response, (chunk) => {
-    if (chunk.status) onStatus?.(chunk.status)
-  })
+  try {
+    await consumeNdjson<CreateChunk>(response, (chunk) => {
+      if (chunk.status) onStatus?.(chunk.status)
+    })
+  } catch (error) {
+    if (
+      error instanceof OllamaApiError &&
+      /failed to validate GGUF with llama-quantize|unknown model architecture/i.test(
+        error.message,
+      )
+    ) {
+      throw new OllamaApiError(
+        '这个 GGUF 文件没有通过完整检查。请确认文件下载完整；如果是图片模型，请同时选择同一下载页、同一版本的主模型和 mmproj 配套文件。',
+        error.status,
+      )
+    }
+    throw error
+  }
 }
 
 export async function testOllamaModel(model: string) {

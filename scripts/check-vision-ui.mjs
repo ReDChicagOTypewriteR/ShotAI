@@ -5,7 +5,7 @@ const browser = await chromium.launch({
   executablePath:
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
 })
-let capturedChat
+const capturedChats = []
 
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } })
@@ -82,7 +82,7 @@ try {
       })
     }
     if (pathname.endsWith('/chat')) {
-      capturedChat = request.postDataJSON()
+      capturedChats.push(request.postDataJSON())
       return route.fulfill({
         status: 200,
         headers: { 'Content-Type': 'application/x-ndjson' },
@@ -149,6 +149,7 @@ try {
     { timeout: 20_000 },
   )
 
+  const capturedChat = capturedChats[0]
   const userMessage = capturedChat?.messages?.findLast(
     (message) => message.role === 'user',
   )
@@ -180,6 +181,33 @@ try {
     throw new Error('automatic vision routing changed the chat model')
   }
 
+  await editor.fill('请继续分析刚才这张图片里的细节。')
+  await editor.press('Enter')
+  await page.waitForFunction(
+    () =>
+      document.body.innerText.match(/多模态图片识别链路测试成功/g)?.length === 2,
+    undefined,
+    { timeout: 20_000 },
+  )
+  const followUpChat = capturedChats[1]
+  const followUpImageCount = followUpChat?.messages?.reduce(
+    (total, message) => total + (message.images?.length ?? 0),
+    0,
+  )
+  if (followUpImageCount !== 1) {
+    throw new Error(
+      `follow-up resent the image more than once: ${followUpImageCount}`,
+    )
+  }
+  if ((followUpChat?.options?.num_ctx ?? 0) < 8192) {
+    throw new Error(
+      `vision context was not expanded: ${followUpChat?.options?.num_ctx}`,
+    )
+  }
+  if (followUpChat?.model !== 'qwen3.6-vision-test:latest') {
+    throw new Error(`vision follow-up used wrong model: ${followUpChat?.model}`)
+  }
+
   await page.waitForFunction(
     () => document.body.innerText.includes('本地数据已保存'),
     undefined,
@@ -205,6 +233,8 @@ try {
         rawBase64Sent: !imagePayload.startsWith('data:'),
         compatibleJpegSent: true,
         promptSent: userMessage.content,
+        followUpImageSentOnce: followUpImageCount === 1,
+        followUpContext: followUpChat.options.num_ctx,
         conversationRestored: true,
       },
       null,

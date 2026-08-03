@@ -81,7 +81,7 @@ flowchart LR
 | 回答引用 | 已实现 | 展示来源文件、段落、匹配方式与摘录；引用来自检索片段，不是独立事实校验器 |
 | 模型管理 | 已实现 | 读取版本、运行状态和能力；支持单 GGUF，视觉模型支持主模型 + `mmproj` 双文件导入 |
 | 内网访问 | 已实现 | Node.js、PowerShell 与 Nginx 三种同源代理路径；客户端无需安装运行时；默认只有主机可以添加和删除模型 |
-| 图片创作 | 已实现 / 取决于模型 | Windows 使用 stable-diffusion.cpp；支持网页导入和删除模型、自动切换、尺寸、进度、停止、预览、PNG 下载与本地历史 |
+| 图片创作 | 已实现 / 取决于模型 | Windows 使用 stable-diffusion.cpp；支持聊天内文字生图、参考图修改、改动幅度、自动切换、进度、停止、预览、PNG 下载与本地历史 |
 | 管理边界 | 已实现基础版 | 主机可管理模型，内网浏览器默认只使用；尚未提供账号登录、细分角色和用户隔离 |
 | 服务端共享历史 | 未实现 | 会话、资料和生成历史不会跨浏览器同步 |
 | 图片任务队列 | 未实现 | 多人同时生成时没有主机级串行队列或资源配额 |
@@ -150,6 +150,19 @@ VITE_WORKBENCH_URL=http://192.168.1.20:9090 npm run build
 
 ## Windows 内网部署
 
+### Electron 桌面客户端
+
+1.1 版本使用 Electron 提供 Windows 桌面窗口、任务栏图标和托盘菜单。Electron
+主进程直接提供 9090 网页并转发 Ollama 与图片服务，不再运行 PowerShell 网页
+脚本，因此不会再出现 Windows PowerShell 5.1 中文编码导致的启动失败。
+
+```bash
+npm run build:win
+```
+
+安装包不包含模型。关闭窗口后内网服务继续运行，可以从托盘重新打开或退出。
+完整说明见 [Electron Windows 客户端说明](docs/ELECTRON_WINDOWS_GUIDE.md)。
+
 ```bash
 npm run package:lan
 ```
@@ -166,6 +179,29 @@ npm run package:lan
 4. 图片模型可在主机“创作图片”页面直接选择；三文件模型一次选中三个文件即可。
 
 完整配置、Windows 防火墙、Nginx 反向代理和图片运行组件说明见 [内网部署文档](docs/LAN_DEPLOYMENT.md)。
+
+### 轻量 EXE 预览版
+
+1.1 预览版新增原生 Windows x64 `ShotAI.exe`，不使用 Electron。它会请求
+管理员权限、准备便携模型目录、启动可用的 Ollama 和图片服务、开放 9090、
+自动打开浏览器，并在安全退出时清理本次启动的子进程。EXE 已写入 ShotAI 图标，
+双击后不会显示黑色控制台窗口，运行信息保存在 `logs`。
+
+```bash
+SHOTAI_GO_BIN=/path/to/go npm run package:windows-lite
+```
+
+产物位于 `release/ShotAI-1.1.0-EXE-Lite/`。该精简包约 15MB，不含模型权重、
+Ollama 和图片生成运行组件；已经安装 Ollama 的 Windows 主机可以直接测试。
+完全免安装时，把可选运行组件复制到对应的 `runtime` 目录。详见
+[EXE 精简版说明](docs/EXE_LITE_GUIDE.md)。
+
+针对 NVIDIA 4070 Ti 等显卡，还可以执行 `npm run package:windows-chat-ready`
+生成 CUDA 12 对话免安装包。它包含必要的 Ollama 运行文件，但排除了 CUDA 13、
+Vulkan、图片生成组件和所有模型权重，压缩后约 900MB。
+
+图片生成组件保持独立，执行 `npm run package:windows-image-runtime` 可生成 CUDA 12
+可选组件包。把组件包内的 `runtime` 文件夹合并进任一 EXE 包即可，仍不包含模型。
 
 ## 为什么这些实现值得保留
 
@@ -184,6 +220,10 @@ npm run package:lan
 | `npm run preview` | 在 `9090` 端口预览工作台构建 |
 | `npm run serve:lan` | 使用 Node.js 提供网页、健康检查和本地服务代理 |
 | `npm run package:lan` | 生成 Windows / Linux 内网交付目录 |
+| `npm run package:windows-lite` | 生成不含模型和大型运行组件的 Windows EXE 精简包 |
+| `npm run package:windows-chat-ready` | 生成包含 Ollama CUDA 12 的 Windows EXE 对话包 |
+| `npm run package:windows-image-runtime` | 生成不含模型的 Windows CUDA 12 图片生成组件包 |
+| `npm run check:windows-launcher` | 检查 EXE 架构、体积、便携目录和精简包内容 |
 | `npm run check:lan-proxy` | 验证 Ollama 与图片服务代理会清理浏览器来源头 |
 | `npm run check:ollama` | 验证工作台到 Ollama 的基础 API 契约 |
 | `npm run check:chat-ux` | 验证长输入、停止、编辑重试和设置入口 |
@@ -191,7 +231,7 @@ npm run package:lan
 | `npm run check:rag-ui` | 知识库交互检查；当前脚本仍依赖旧版界面文案，待更新后再作为发布门禁 |
 | `npm run check:vision-ui` | 验证视觉模型识别与图片提示 |
 | `npm run check:vision-import` | 验证视觉主模型与 `mmproj` 配对导入 |
-| `npm run check:image-generation` | 验证图片生成路由、进度、预览与下载 |
+| `npm run check:image-generation` | 验证文字生图、参考图修改、改动幅度、进度、预览与下载 |
 | `npm run check:image-package` | 验证 Windows 图片运行组件与发布包结构 |
 | `npm run check:v1-ui` | 验证 1.0 版本标识与主机 / 内网管理边界 |
 

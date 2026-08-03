@@ -17,15 +17,11 @@ const (
 )
 
 var (
-	shell32                = syscall.NewLazyDLL("shell32.dll")
-	kernel32               = syscall.NewLazyDLL("kernel32.dll")
-	procIsUserAnAdmin      = shell32.NewProc("IsUserAnAdmin")
-	procShellExecuteW      = shell32.NewProc("ShellExecuteW")
-	procSetConsoleOutputCP = kernel32.NewProc("SetConsoleOutputCP")
-	procSetConsoleCP       = kernel32.NewProc("SetConsoleCP")
-	procSetConsoleTitleW   = kernel32.NewProc("SetConsoleTitleW")
-	user32                 = syscall.NewLazyDLL("user32.dll")
-	procMessageBoxW        = user32.NewProc("MessageBoxW")
+	shell32           = syscall.NewLazyDLL("shell32.dll")
+	procIsUserAnAdmin = shell32.NewProc("IsUserAnAdmin")
+	procShellExecuteW = shell32.NewProc("ShellExecuteW")
+	user32            = syscall.NewLazyDLL("user32.dll")
+	procMessageBoxW   = user32.NewProc("MessageBoxW")
 )
 
 func isAdministrator() bool {
@@ -92,13 +88,6 @@ func openBrowser(url string) error {
 	command := exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", url)
 	configureHiddenProcess(command)
 	return command.Start()
-}
-
-func setConsoleUTF8() {
-	procSetConsoleOutputCP.Call(65001)
-	procSetConsoleCP.Call(65001)
-	title, _ := syscall.UTF16PtrFromString("ShotAI 本地智能工作台")
-	procSetConsoleTitleW.Call(uintptr(unsafe.Pointer(title)))
 }
 
 func fatalDialog(message string) {

@@ -1,14 +1,18 @@
 import { chromium } from 'playwright-core'
+import { readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const portalDirectory = dirname(dirname(fileURLToPath(import.meta.url)))
+const portalPackage = JSON.parse(
+  await readFile(join(portalDirectory, 'package.json'), 'utf8'),
+)
 const staticIndexUrl = pathToFileURL(
   join(
     portalDirectory,
     '..',
     'release',
-    'ShotAI-1.0.0-Portal-Static',
+    `ShotAI-${portalPackage.version}-Portal-Static`,
     'index.html',
   ),
 ).href
@@ -38,7 +42,7 @@ try {
   })
   await page.getByText('真正可控的 AI 对话', { exact: true }).waitFor()
   await page
-    .getByText('图片模型 · 快速版', { exact: true })
+    .getByRole('heading', { name: '能生成，也能照着改。' })
     .waitFor()
 
   const desktop = await page.evaluate(() => {
@@ -72,7 +76,7 @@ try {
     timeout: 20_000,
   })
   await mobile.getByRole('button', { name: '打开或关闭导航' }).click()
-  await mobile.getByRole('link', { name: '交互' }).waitFor()
+  await mobile.getByRole('link', { name: '图片创作' }).waitFor()
   const mobileMetrics = await mobile.evaluate(() => ({
     viewportWidth: window.innerWidth,
     documentWidth: document.documentElement.scrollWidth,

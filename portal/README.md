@@ -29,7 +29,7 @@ npm run build
 npm run package:static
 ```
 
-产物位于 `../release/ShotAI-1.0.0-Portal-Static`，不包含源码、Node.js 或 ZIP。
+产物位于 `../release/ShotAI-1.1.3-Portal-Static`，不包含源码、Node.js 或 ZIP。
 
 服务器目录示例：
 

@@ -1,13 +1,16 @@
-import { cp, mkdir, rm } from 'node:fs/promises'
+import { cp, mkdir, readFile, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const portalDirectory = dirname(dirname(fileURLToPath(import.meta.url)))
 const projectDirectory = dirname(portalDirectory)
+const portalPackage = JSON.parse(
+  await readFile(join(portalDirectory, 'package.json'), 'utf8'),
+)
 const outputDirectory = join(
   projectDirectory,
   'release',
-  'ShotAI-1.0.0-Portal-Static',
+  `ShotAI-${portalPackage.version}-Portal-Static`,
 )
 
 await rm(outputDirectory, { recursive: true, force: true })

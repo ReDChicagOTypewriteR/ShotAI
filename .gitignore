@@ -4,6 +4,7 @@ portal/node_modules/
 
 # Build outputs
 dist/
+build/
 portal/dist/
 release/
 

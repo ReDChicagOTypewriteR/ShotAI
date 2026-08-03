@@ -9,6 +9,24 @@ let created = false
 let createPayload
 const uploadedDigests = new Set()
 
+function createFakeGguf(label) {
+  const header = Buffer.alloc(24)
+  header.write('GGUF', 0, 'ascii')
+  header.writeUInt32LE(3, 4)
+  header.writeBigUInt64LE(1n, 8)
+  header.writeBigUInt64LE(1n, 16)
+  return Buffer.concat([header, Buffer.from(label)])
+}
+
+function createMetadataFreeGguf() {
+  const header = Buffer.alloc(24)
+  header.write('GGUF', 0, 'ascii')
+  header.writeUInt32LE(3, 4)
+  header.writeBigUInt64LE(453n, 8)
+  header.writeBigUInt64LE(0n, 16)
+  return header
+}
+
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } })
   await page.route('**/ollama/api/**', async (route) => {
@@ -108,22 +126,37 @@ try {
   })
   await page.locator('.composer-tool-button').click()
   await page.getByText('管理 AI 模型', { exact: true }).click()
-  await page.getByRole('button', { name: '添加模型', exact: true }).click()
+  await page
+    .getByLabel('模型管理')
+    .getByRole('button', { name: '添加模型', exact: true })
+    .click()
 
-  const ggufHeader = Buffer.concat([
-    Buffer.from('GGUF'),
-    Buffer.from('shotai-vision-import-test'),
-  ])
+  await page.locator('.model-uploader input[type="file"]').setInputFiles({
+    name: 'old-vision-model.gguf',
+    mimeType: 'application/octet-stream',
+    buffer: createMetadataFreeGguf(),
+  })
+  await page.getByRole('button', { name: '下一步' }).click()
+  const validationMessage = page.locator('.el-message--error').last()
+  await validationMessage.waitFor({ state: 'visible', timeout: 10_000 })
+  const validationText = await validationMessage.innerText()
+  if (!validationText.includes('缺少模型说明信息')) {
+    throw new Error(`unexpected GGUF validation message: ${validationText}`)
+  }
+  const rejectedItem = page.locator('.model-uploader .el-upload-list__item').first()
+  await rejectedItem.hover()
+  await rejectedItem.locator('.el-upload-list__item-delete').click()
+
   await page.locator('.model-uploader input[type="file"]').setInputFiles([
     {
       name: 'Qwen3.5-9B-Q4_K_M.gguf',
       mimeType: 'application/octet-stream',
-      buffer: ggufHeader,
+      buffer: createFakeGguf('shotai-vision-import-test'),
     },
     {
       name: 'mmproj-Qwen3.5-9B-F16.gguf',
       mimeType: 'application/octet-stream',
-      buffer: Buffer.concat([Buffer.from('GGUF'), Buffer.from('projector')]),
+      buffer: createFakeGguf('projector'),
     },
   ])
 
@@ -163,6 +196,7 @@ try {
       {
         pairedFiles: Object.keys(files),
         oneCreateRequest: true,
+        metadataFreeGgufRejected: true,
         visionCapabilityVerified: true,
         createdModel: createPayload.model,
       },
