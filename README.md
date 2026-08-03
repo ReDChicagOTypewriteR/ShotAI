@@ -17,7 +17,9 @@
   <a href="#从一台主机到多台浏览器">工作方式</a> ·
   <a href="#开始使用">开始使用</a> ·
   <a href="#能力与边界">能力边界</a> ·
-  <a href="docs/LAN_DEPLOYMENT.md">内网部署</a>
+  <a href="docs/SHOTAI_1.2_FEATURES.md">1.2 功能</a> ·
+  <a href="docs/LAN_DEPLOYMENT.md">内网部署</a> ·
+  <a href="docs/DEVELOPMENT_WORKFLOW.md">开发流程</a>
 </p>
 
 ![ShotAI 离线 AI 工作台](docs/images/shotai-product-preview.png)
