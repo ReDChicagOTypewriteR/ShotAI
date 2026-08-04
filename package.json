@@ -2,7 +2,7 @@
   "name": "shotai",
   "productName": "ShotAI",
   "private": true,
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "ShotAI 本地与内网 AI 工作台",
   "author": "ShotAI",
   "main": "desktop/electron/main.cjs",

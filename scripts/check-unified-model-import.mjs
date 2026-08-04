@@ -8,6 +8,15 @@ if (/import\.meta\.resolve/.test(builtHtml) || /type=["']module["']/.test(builtH
   throw new Error('legacy-compatible build still contains the modern browser probe')
 }
 
+function createMetadataFreeGguf() {
+  const buffer = Buffer.alloc(64)
+  buffer.write('GGUF', 0, 'ascii')
+  buffer.writeUInt32LE(3, 4)
+  buffer.writeBigUInt64LE(1n, 8)
+  buffer.writeBigUInt64LE(0n, 16)
+  return buffer
+}
+
 const browser = await chromium.launch({
   headless: true,
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -18,7 +27,7 @@ try {
   await page.route('**/shotai/system', (route) =>
     route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ version: '1.1.4', isHost: true, canManage: true, port: 9090 }),
+      body: JSON.stringify({ version: '1.1.5', isHost: true, canManage: true, port: 9090 }),
     }),
   )
   await page.route('**/image-runtime/status', (route) =>
@@ -52,12 +61,15 @@ try {
   await modelDrawer.getByRole('button', { name: '添加模型', exact: true }).click()
   const dialog = page.locator('.import-dialog')
   await dialog.locator('input[type="file"]').setInputFiles([
-    { name: 'flux-2-klein-9b-Q4_0.gguf', mimeType: 'application/octet-stream', buffer: Buffer.alloc(64) },
-    { name: 'Qwen3-8B-Q4_K_M.gguf', mimeType: 'application/octet-stream', buffer: Buffer.alloc(64) },
+    { name: 'flux-2-klein-9b-Q4_0.gguf', mimeType: 'application/octet-stream', buffer: createMetadataFreeGguf() },
+    { name: 'Qwen3-8B-Q4_K_M.gguf', mimeType: 'application/octet-stream', buffer: createMetadataFreeGguf() },
     { name: 'flux2-vae.safetensors', mimeType: 'application/octet-stream', buffer: Buffer.alloc(64) },
   ])
   await dialog.getByText('已识别为图片生成与修改模型', { exact: true }).waitFor()
   await dialog.getByText(/重复的文件会直接复用/).waitFor()
+  await dialog.getByRole('button', { name: '下一步' }).click()
+  await dialog.getByText('文件正常', { exact: true }).waitFor()
+  await dialog.getByText('生成与修改图片', { exact: true }).waitFor()
   await dialog.getByRole('button', { name: '取消' }).click()
 
   await page.keyboard.press('Escape')
@@ -70,6 +82,7 @@ try {
         oldBrowserProbeRemoved: true,
         oneModelImportEntry: true,
         imagePipelineAutoDetected: true,
+        metadataFreeImageGgufAccepted: true,
         duplicateFileReuseExplained: true,
         modelCacheCleanupVisible: true,
       },

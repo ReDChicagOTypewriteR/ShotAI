@@ -3382,7 +3382,13 @@ async function nextImportStep() {
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index]
         importStatus.value = `正在检查 ${file.name} · ${index + 1}/${files.length}`
-        if (file.name.toLowerCase().endsWith('.gguf')) await verifyGgufFile(file)
+        if (file.name.toLowerCase().endsWith('.gguf')) {
+          // stable-diffusion.cpp image weights may be valid GGUF files with no
+          // general.* metadata. Ollama chat models still use the stricter
+          // validation below, while image-runtime files only need a valid
+          // GGUF header and tensor table.
+          await verifyGgufFile(file, { allowMissingMetadata: true })
+        }
         shas[file.name] = await calculateFileSha256(file, (progress) => {
           importStatus.value = `正在检查 ${file.name} · ${progress}%`
         })
