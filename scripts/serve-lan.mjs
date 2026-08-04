@@ -2,6 +2,7 @@ import {
   createReadStream,
   createWriteStream,
   existsSync,
+  linkSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -9,6 +10,7 @@ import {
   statSync,
   unlinkSync,
 } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { createServer, request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { networkInterfaces } from 'node:os'
@@ -71,6 +73,7 @@ const imageModelDirectory = process.env.SHOTAI_IMAGE_MODEL_DIRECTORY
 const imageRuntimeDirectory = process.env.SHOTAI_IMAGE_RUNTIME_DIRECTORY
   ? resolve(process.env.SHOTAI_IMAGE_RUNTIME_DIRECTORY)
   : join(dataDirectory, 'runtime', 'image')
+const ollamaModelDirectory = join(dataDirectory, 'models', 'ollama')
 const releaseVersion = process.env.SHOTAI_VERSION || fileConfig.version || '1.0.0'
 const allowLanAdministration = fileConfig.allowLanAdministration === true
 const localAddresses = new Set(
@@ -140,6 +143,28 @@ function getImageModelName(requestUrl) {
   return /\.(?:gguf|safetensors|sft|ckpt)$/i.test(fileName) ? fileName : ''
 }
 
+function normalizeSha256(value = '') {
+  const normalized = String(value).trim().toLowerCase().replace(/^sha256[:-]/, '')
+  return /^[a-f0-9]{64}$/.test(normalized) ? normalized : ''
+}
+
+function ollamaBlobPath(sha256) {
+  return join(ollamaModelDirectory, 'blobs', `sha256-${sha256}`)
+}
+
+function ensureSharedOllamaBlob(source, sha256) {
+  if (!sha256 || !source.toLowerCase().endsWith('.gguf')) return false
+  const destination = ollamaBlobPath(sha256)
+  if (existsSync(destination)) return true
+  mkdirSync(dirname(destination), { recursive: true })
+  try {
+    linkSync(source, destination)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function saveImageModel(request, response, requestUrl) {
   const fileName = getImageModelName(requestUrl)
   if (!fileName) {
@@ -156,10 +181,13 @@ function saveImageModel(request, response, requestUrl) {
   const destination = join(imageModelDirectory, fileName)
   const temporary = `${destination}.uploading`
   const output = createWriteStream(temporary, { flags: 'w' })
+  const expectedSha256 = normalizeSha256(request.headers['x-shotai-sha256'])
+  const hasher = createHash('sha256')
   let received = 0
 
   request.on('data', (chunk) => {
     received += chunk.length
+    hasher.update(chunk)
   })
   request.on('aborted', () => output.destroy(new Error('上传已取消')))
   output.on('error', (error) => {
@@ -174,11 +202,70 @@ function saveImageModel(request, response, requestUrl) {
       respondJson(response, 400, { error: '文件上传不完整，请重新选择' })
       return
     }
+    const sha256 = hasher.digest('hex')
+    if (expectedSha256 && sha256 !== expectedSha256) {
+      if (existsSync(temporary)) unlinkSync(temporary)
+      respondJson(response, 400, { error: '文件校验没有通过，请重新选择原文件' })
+      return
+    }
     if (existsSync(destination)) unlinkSync(destination)
     renameSync(temporary, destination)
-    respondJson(response, 201, { fileName, size: received })
+    respondJson(response, 201, {
+      fileName,
+      size: received,
+      sha256,
+      sharedWithChat: ensureSharedOllamaBlob(destination, sha256),
+    })
   })
   request.pipe(output)
+}
+
+function readJsonRequest(request, maximumBytes = 64 * 1024) {
+  return new Promise((resolveBody, rejectBody) => {
+    const chunks = []
+    let total = 0
+    request.on('data', (chunk) => {
+      total += chunk.length
+      if (total > maximumBytes) {
+        rejectBody(new Error('请求内容过大'))
+        request.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    request.on('end', () => {
+      try {
+        resolveBody(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'))
+      } catch {
+        rejectBody(new Error('请求内容无法识别'))
+      }
+    })
+    request.on('error', rejectBody)
+  })
+}
+
+async function reuseOllamaModelForImages(request, response) {
+  try {
+    const body = await readJsonRequest(request)
+    const fileName = basename(String(body.fileName || ''))
+    const sha256 = normalizeSha256(body.sha256)
+    if (!fileName.toLowerCase().endsWith('.gguf') || !sha256) {
+      respondJson(response, 400, { error: '模型文件信息不完整' })
+      return
+    }
+    const source = ollamaBlobPath(sha256)
+    if (!existsSync(source)) {
+      respondJson(response, 404, { error: '没有找到可以复用的模型文件' })
+      return
+    }
+    mkdirSync(imageModelDirectory, { recursive: true })
+    const destination = join(imageModelDirectory, fileName)
+    if (existsSync(destination)) unlinkSync(destination)
+    linkSync(source, destination)
+    respondJson(response, 200, { reused: true, fileName, sha256 })
+  } catch (error) {
+    respondJson(response, 500, { error: `复用失败：${error.message}` })
+  }
 }
 
 function deleteImageModel(response, requestUrl) {
@@ -330,6 +417,58 @@ function listImageModelFiles() {
     .sort()
 }
 
+function selectImageModelFiles(modelFiles) {
+  const isComponent = (name) => /qwen|text.?encoder|clip|t5|vae|(?:^|[-_.])ae(?:[-_.]|$)/i.test(name)
+  const diffusion = modelFiles.find(
+    (name) =>
+      /flux.?2.*klein|z.?image.*turbo/i.test(name) && !isComponent(name),
+  )
+  if (diffusion) {
+    const wantsEightB = /9b/i.test(diffusion)
+    const encoders = modelFiles.filter(
+      (name) => name.toLowerCase().endsWith('.gguf') && /qwen|text.?encoder/i.test(name),
+    )
+    const textEncoder =
+      encoders.find((name) => wantsEightB ? /8b/i.test(name) : /4b/i.test(name)) ||
+      encoders[0]
+    const vae = modelFiles.find(
+      (name) =>
+        /flux.?2.*vae|(?:^|[-_.])vae(?:[-_.]|$)|(?:^|[-_.])ae(?:[-_.]|$)/i.test(name) ||
+        name.toLowerCase() === 'diffusion_pytorch_model.safetensors',
+    )
+    const missingFiles = []
+    if (!textEncoder) missingFiles.push(wantsEightB ? 'Qwen3-8B 文字理解文件' : 'Qwen3-4B 文字理解文件')
+    if (!vae) missingFiles.push('FLUX.2 图片处理文件')
+    return {
+      kind: 'pipeline',
+      configured: missingFiles.length === 0,
+      diffusion,
+      textEncoder: textEncoder || '',
+      vae: vae || '',
+      missingFiles,
+    }
+  }
+
+  const single = modelFiles.find(
+    (name) =>
+      /stable.?diffusion|sdxl|sd.?3|juggernaut|dreamshaper/i.test(name) &&
+      !isComponent(name),
+  )
+  if (single) {
+    return {
+      kind: 'single',
+      configured: true,
+      single,
+      missingFiles: [],
+    }
+  }
+  return {
+    kind: 'unknown',
+    configured: false,
+    missingFiles: modelFiles.length ? ['可识别的图片主模型文件'] : ['图片模型文件'],
+  }
+}
+
 async function checkImageRuntime() {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 2_000)
@@ -348,6 +487,7 @@ async function checkImageRuntime() {
 
 async function getImageRuntimeStatus() {
   const modelFiles = listImageModelFiles()
+  const selection = selectImageModelFiles(modelFiles)
   const service = await checkImageRuntime()
   const runtimeFound =
     existsSync(join(imageRuntimeDirectory, 'sd-server.exe')) ||
@@ -364,12 +504,73 @@ async function getImageRuntimeStatus() {
     serviceOnline: service.online,
     serviceStatus: service.status,
     runtimeFound,
-    modelConfigured: modelFiles.length > 0,
+    modelConfigured: selection.configured,
     modelLabel: detectedModelLabel,
     modelFiles,
+    modelKind: selection.kind,
+    missingFiles: selection.missingFiles,
+    runtimeError: service.online
+      ? ''
+      : globalThis.__shotaiImageRuntimeState?.error || '',
     modelDirectory: 'models/image',
     runtimeDirectory: 'runtime/image',
   }
+}
+
+function walkFiles(directory) {
+  if (!existsSync(directory)) return []
+  const files = []
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) files.push(...walkFiles(path))
+    else if (entry.isFile()) files.push(path)
+  }
+  return files
+}
+
+function collectReferencedOllamaDigests() {
+  const referenced = new Set()
+  const manifestDirectory = join(ollamaModelDirectory, 'manifests')
+  for (const path of walkFiles(manifestDirectory)) {
+    try {
+      const manifest = JSON.parse(readFileSync(path, 'utf8'))
+      const digests = [manifest.config?.digest, ...(manifest.layers || []).map((layer) => layer.digest)]
+      for (const digest of digests) {
+        const normalized = normalizeSha256(digest)
+        if (normalized) referenced.add(normalized)
+      }
+    } catch {
+      // Ignore files that are not valid Ollama manifests.
+    }
+  }
+  return referenced
+}
+
+function cleanupModelCache() {
+  const removable = []
+  for (const path of walkFiles(join(dataDirectory, 'models'))) {
+    if (/\.(?:uploading|partial|tmp)$/i.test(path)) removable.push(path)
+  }
+
+  const referenced = collectReferencedOllamaDigests()
+  const blobDirectory = join(ollamaModelDirectory, 'blobs')
+  for (const path of walkFiles(blobDirectory)) {
+    const match = basename(path).match(/^sha256-([a-f0-9]{64})$/i)
+    if (match && !referenced.has(match[1].toLowerCase())) removable.push(path)
+  }
+
+  let removedFiles = 0
+  let removedBytes = 0
+  for (const path of [...new Set(removable)]) {
+    try {
+      removedBytes += statSync(path).size
+      unlinkSync(path)
+      removedFiles += 1
+    } catch {
+      // A file may still be in use; leave it for the next cleanup.
+    }
+  }
+  return { removedFiles, removedBytes }
 }
 
 function resolveStaticFile(pathname, acceptsHtml) {
@@ -465,6 +666,19 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  if (requestUrl.pathname === '/image-runtime/models/reuse') {
+    if (!canManageRequest(request)) {
+      respondJson(response, 403, { error: '请在运行 ShotAI 的主机上管理模型' })
+      return
+    }
+    if (request.method !== 'POST') {
+      respondJson(response, 405, { error: '不支持这项操作' })
+      return
+    }
+    await reuseOllamaModelForImages(request, response)
+    return
+  }
+
   if (requestUrl.pathname.startsWith('/image-runtime/models/')) {
     if (!canManageRequest(request)) {
       respondJson(response, 403, { error: '请在运行 ShotAI 的主机上管理图片模型' })
@@ -505,6 +719,19 @@ const server = createServer(async (request, response) => {
         ? '图片服务正在重新载入'
         : '请重新启动 ShotAI 以载入图片模型',
     })
+    return
+  }
+
+  if (requestUrl.pathname === '/shotai/model-cache') {
+    if (!canManageRequest(request)) {
+      respondJson(response, 403, { error: '请在运行 ShotAI 的主机上清理模型临时文件' })
+      return
+    }
+    if (request.method !== 'DELETE') {
+      respondJson(response, 405, { error: '不支持这项操作' })
+      return
+    }
+    respondJson(response, 200, cleanupModelCache())
     return
   }
 

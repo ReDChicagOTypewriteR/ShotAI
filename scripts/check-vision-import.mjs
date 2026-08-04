@@ -143,9 +143,13 @@ try {
   if (!validationText.includes('缺少模型说明信息')) {
     throw new Error(`unexpected GGUF validation message: ${validationText}`)
   }
-  const rejectedItem = page.locator('.model-uploader .el-upload-list__item').first()
-  await rejectedItem.hover()
-  await rejectedItem.locator('.el-upload-list__item-delete').click()
+  await page.getByRole('button', { name: '取消' }).click()
+  await page.locator('.composer-tool-button').click()
+  await page.getByText('管理 AI 模型', { exact: true }).click()
+  await page
+    .getByLabel('模型管理')
+    .getByRole('button', { name: '添加模型', exact: true })
+    .click()
 
   await page.locator('.model-uploader input[type="file"]').setInputFiles([
     {
