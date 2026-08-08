@@ -1,24 +1,14 @@
 <p align="center">
   <a href="http://alexjoker.top/projects/ShotAI/">
-    <img src="docs/images/shotai-logo.svg" width="80" height="80" alt="ShotAI" />
+    <img src="docs/images/readme-hero.svg" alt="ShotAI — 本地 AI，为整个局域网服务" />
   </a>
 </p>
 
-<h1 align="center">ShotAI</h1>
-
 <p align="center">
-  <strong>让一台电脑，成为整个局域网的本地 AI 工作台。</strong>
-</p>
-
-<p align="center">
-  对话 · 文件阅读 · 资料查找 · 图片理解 · 图片创作
-</p>
-
-<p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-1.1.6-111111?style=flat-square" />
-  <img alt="Windows" src="https://img.shields.io/badge/Windows-Electron-111111?style=flat-square" />
-  <img alt="Local AI" src="https://img.shields.io/badge/AI-local--first-111111?style=flat-square" />
-  <img alt="LAN" src="https://img.shields.io/badge/LAN-9090-111111?style=flat-square" />
+  <img alt="Version" src="https://img.shields.io/badge/VERSION-1.1.6-111111?style=for-the-badge" />
+  <img alt="Windows" src="https://img.shields.io/badge/WINDOWS-ELECTRON-111111?style=for-the-badge" />
+  <img alt="Local AI" src="https://img.shields.io/badge/AI-LOCAL_FIRST-111111?style=for-the-badge" />
+  <img alt="LAN" src="https://img.shields.io/badge/LAN-PORT_9090-111111?style=for-the-badge" />
 </p>
 
 <p align="center">
@@ -28,20 +18,27 @@
   <a href="docs/README.md">全部文档</a>
 </p>
 
+<br />
+
+<p align="center"><sub>THE WORKBENCH / 工作台</sub></p>
+
 ![ShotAI 工作台预览](docs/images/shotai-product-preview.png)
+
+<p align="center"><sub>统一的对话、文件、模型与图片创作入口</sub></p>
+
+<p><sub>01 / OVERVIEW</sub></p>
 
 ## 一台主机，所有人直接使用
 
 ShotAI 把本地模型、文件、资料库和图片能力放进同一个网页。管理员只需在主机准备运行组件和模型，局域网内的其他电脑打开浏览器即可使用，无需分别安装 Node.js、Ollama 或模型。
 
-```mermaid
-flowchart LR
-    A["局域网电脑<br/>浏览器访问"] --> B["ShotAI 主机<br/>端口 9090"]
-    B --> C["Ollama<br/>对话 · 识图 · 资料查找"]
-    B --> D["本地图片组件<br/>生成 · 修改"]
-```
+![ShotAI 局域网运行方式](docs/images/readme-network.svg)
+
+<p><sub>02 / CAPABILITIES</sub></p>
 
 ## 已经可以做什么
+
+![ShotAI 核心能力](docs/images/readme-capabilities.svg)
 
 | 能力 | 使用体验 | 当前支持 |
 | --- | --- | --- |
@@ -52,6 +49,8 @@ flowchart LR
 | 图片创作 | 在对话框内生成图片、参考图修改 | 本地图片模型与运行组件 |
 | 模型管理 | 一个入口完成识别、导入、查看和清理 | GGUF、mmproj 与图片配套文件 |
 | 内网共享 | 主机运行，其他电脑用浏览器访问 | Windows Electron 与 9090 服务 |
+
+<p><sub>03 / GET STARTED</sub></p>
 
 ## 三步开始
 
@@ -73,6 +72,8 @@ npm run dev
 
 工作台通常运行在 `http://127.0.0.1:5173/`。构建与检查命令见 [开发流程](docs/DEVELOPMENT_WORKFLOW.md)。
 
+<p><sub>04 / MODEL ROUTING</sub></p>
+
 ## 模型如何分工
 
 ShotAI 会根据任务使用对应能力，不要求使用者频繁手动切换。
@@ -85,6 +86,8 @@ ShotAI 会根据任务使用对应能力，不要求使用者频繁手动切换�
 | 生成或修改图片 | 图片主模型及其文本编码器、VAE 和本地图片运行组件 |
 
 相同的模型文件只保存一份，可以被多个功能共同使用。兼容范围和导入排错见 [内网部署说明](docs/LAN_DEPLOYMENT.md)。
+
+<p><sub>05 / DOCUMENTATION</sub></p>
 
 ## 文档
 

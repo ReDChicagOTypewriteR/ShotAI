@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 330" role="img" aria-labelledby="title desc">
+  <title id="title">ShotAI 四项核心能力</title>
+  <desc id="desc">对话、文件、视觉和图片创作四张深色功能卡片。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#101417"/><stop offset="1" stop-color="#090b0d"/></linearGradient>
+  </defs>
+  <rect width="1440" height="330" rx="22" fill="#07090b"/>
+  <g font-family="Arial, 'PingFang SC', sans-serif">
+    <g transform="translate(30 30)">
+      <rect width="330" height="270" rx="17" fill="url(#bg)" stroke="#30373c"/>
+      <text x="24" y="38" fill="#69737a" font-size="10" letter-spacing="2">01 / CHAT</text>
+      <circle cx="282" cy="42" r="6" fill="#74f7c5"/>
+      <path d="M28 80h274M28 218h274" stroke="#22292e"/>
+      <rect x="28" y="105" width="190" height="28" rx="14" fill="#20272c"/>
+      <rect x="72" y="145" width="230" height="44" rx="14" fill="#f0f3f4"/>
+      <path d="M90 163h144M90 175h104" stroke="#68737a" stroke-width="4" stroke-linecap="round"/>
+      <text x="28" y="245" fill="#f0f3f4" font-size="17" font-weight="700">本地对话</text>
+      <text x="28" y="266" fill="#737d84" font-size="11">流式回答 · 随时停止 · 编辑重答</text>
+    </g>
+    <g transform="translate(380 30)">
+      <rect width="330" height="270" rx="17" fill="url(#bg)" stroke="#30373c"/>
+      <text x="24" y="38" fill="#69737a" font-size="10" letter-spacing="2">02 / FILES</text>
+      <path d="M28 80h274M28 218h274" stroke="#22292e"/>
+      <g transform="translate(28 103)">
+        <rect width="62" height="74" rx="8" fill="#151b1f" stroke="#4a555c"/><path d="M42 0v20h20" fill="none" stroke="#4a555c"/>
+        <text x="31" y="51" text-anchor="middle" fill="#dce1e3" font-size="11" font-weight="700">PDF</text>
+        <rect x="76" width="62" height="74" rx="8" fill="#151b1f" stroke="#4a555c"/><path d="M118 0v20h20" fill="none" stroke="#4a555c"/>
+        <text x="107" y="51" text-anchor="middle" fill="#dce1e3" font-size="11" font-weight="700">DOCX</text>
+        <rect x="152" width="62" height="74" rx="8" fill="#151b1f" stroke="#4a555c"/><path d="M194 0v20h20" fill="none" stroke="#4a555c"/>
+        <text x="183" y="51" text-anchor="middle" fill="#74f7c5" font-size="11" font-weight="700">XLSX</text>
+      </g>
+      <text x="28" y="245" fill="#f0f3f4" font-size="17" font-weight="700">文件与资料</text>
+      <text x="28" y="266" fill="#737d84" font-size="11">读取文档 · 本地检索 · 显示来源</text>
+    </g>
+    <g transform="translate(730 30)">
+      <rect width="330" height="270" rx="17" fill="url(#bg)" stroke="#30373c"/>
+      <text x="24" y="38" fill="#69737a" font-size="10" letter-spacing="2">03 / VISION</text>
+      <path d="M28 80h274M28 218h274" stroke="#22292e"/>
+      <rect x="28" y="101" width="274" height="91" rx="10" fill="#0b0e10" stroke="#3d464c"/>
+      <circle cx="245" cy="125" r="12" fill="#74f7c5" fill-opacity="0.75"/>
+      <path d="m28 175 58-46 35 26 36-31 72 68H28Z" fill="#273138"/>
+      <path d="m142 192 55-48 48 48" fill="#39454c"/>
+      <path d="M194 112h84v58" fill="none" stroke="#cbd2d6" stroke-dasharray="5 5"/>
+      <text x="28" y="245" fill="#f0f3f4" font-size="17" font-weight="700">图片理解</text>
+      <text x="28" y="266" fill="#737d84" font-size="11">上传图片 · 自动选择视觉模型</text>
+    </g>
+    <g transform="translate(1080 30)">
+      <rect width="330" height="270" rx="17" fill="url(#bg)" stroke="#30373c"/>
+      <text x="24" y="38" fill="#69737a" font-size="10" letter-spacing="2">04 / CREATE</text>
+      <path d="M28 80h274M28 218h274" stroke="#22292e"/>
+      <rect x="28" y="101" width="122" height="91" rx="10" fill="#12171a" stroke="#3d464c"/>
+      <path d="m28 177 43-39 23 19 25-27 31 47" fill="#354149"/>
+      <path d="M165 146h34M182 129v34" stroke="#74f7c5" stroke-width="2" stroke-linecap="round"/>
+      <rect x="214" y="101" width="88" height="91" rx="10" fill="#e9edef"/>
+      <path d="m214 177 30-29 17 14 18-25 23 40" fill="#6a757c"/>
+      <text x="28" y="245" fill="#f0f3f4" font-size="17" font-weight="700">生成与修改</text>
+      <text x="28" y="266" fill="#737d84" font-size="11">文字生图 · 参考图修改 · 本地保存</text>
+    </g>
+  </g>
+</svg>

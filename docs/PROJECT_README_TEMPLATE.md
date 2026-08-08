@@ -2,30 +2,20 @@
 使用方法：
 1. 将本文件复制到新项目根目录并命名为 README.md。
 2. 替换所有 {占位内容}，删除不需要的章节和这段说明。
-3. 建议准备一张透明背景 Logo 和一张 16:9 产品预览图。
+3. 建议准备一张 1440×500 品牌头图、一张 16:9 产品截图和一张功能概览图。
 4. 首页只放帮助使用者快速理解和开始使用的内容，细节放到 docs/。
 -->
 
 <p align="center">
   <a href="{产品网站或项目地址}">
-    <img src="{Logo 路径}" width="80" height="80" alt="{项目名称}" />
+    <img src="{品牌头图路径}" alt="{项目名称} — {一句话定位}" />
   </a>
 </p>
 
-<h1 align="center">{项目名称}</h1>
-
 <p align="center">
-  <strong>{一句话说明项目为谁解决什么问题}</strong>
-</p>
-
-<p align="center">
-  {关键词一} · {关键词二} · {关键词三} · {关键词四}
-</p>
-
-<p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-{版本号}-111111?style=flat-square" />
-  <img alt="Platform" src="https://img.shields.io/badge/platform-{运行平台}-111111?style=flat-square" />
-  <img alt="Status" src="https://img.shields.io/badge/status-{项目状态}-111111?style=flat-square" />
+  <img alt="Version" src="https://img.shields.io/badge/VERSION-{版本号}-111111?style=for-the-badge" />
+  <img alt="Platform" src="https://img.shields.io/badge/PLATFORM-{运行平台}-111111?style=for-the-badge" />
+  <img alt="Status" src="https://img.shields.io/badge/STATUS-{项目状态}-111111?style=for-the-badge" />
 </p>
 
 <p align="center">
@@ -35,7 +25,15 @@
   <a href="{更新记录链接}">更新记录</a>
 </p>
 
-![{项目名称} 产品预览]({预览图路径})
+<br />
+
+<p align="center"><sub>THE PRODUCT / 产品界面</sub></p>
+
+![{项目名称} 产品预览]({产品截图路径})
+
+<p align="center"><sub>{一句简短的截图说明}</sub></p>
+
+<p><sub>01 / OVERVIEW</sub></p>
 
 ## {一句简短的价值标题}
 
@@ -48,7 +46,11 @@ flowchart LR
     B --> D["{核心能力二}"]
 ```
 
+<p><sub>02 / CAPABILITIES</sub></p>
+
 ## 核心能力
+
+![{项目名称} 核心能力]({功能概览图路径})
 
 | 能力 | 使用体验 | 当前支持 |
 | --- | --- | --- |
@@ -56,6 +58,8 @@ flowchart LR
 | {能力二} | {使用者如何操作} | {支持范围} |
 | {能力三} | {使用者如何操作} | {支持范围} |
 | {能力四} | {使用者如何操作} | {支持范围} |
+
+<p><sub>03 / GET STARTED</sub></p>
 
 ## 三步开始
 
@@ -70,6 +74,8 @@ flowchart LR
 
 默认访问地址：`{本地地址}`。
 
+<p><sub>04 / WORKFLOW</sub></p>
+
 ## 工作方式
 
 | 场景 | 需要准备 | 得到什么 |
@@ -77,6 +83,8 @@ flowchart LR
 | {场景一} | {前置条件} | {结果} |
 | {场景二} | {前置条件} | {结果} |
 | {场景三} | {前置条件} | {结果} |
+
+<p><sub>05 / DOCUMENTATION</sub></p>
 
 ## 文档
 
