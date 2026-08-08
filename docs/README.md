@@ -14,7 +14,7 @@
 
 | 文档 | 主要内容 |
 | --- | --- |
-| [1.2 功能说明](SHOTAI_1.2_FEATURES.md) | 当前能力、使用流程和功能边界 |
+| [当前功能说明](CURRENT_FEATURES.md) | 当前能力、使用流程和功能边界 |
 | [产品架构](PRODUCT_ARCHITECTURE.md) | 工作台、模型服务和内网访问之间的关系 |
 | [图片创作方案](IMAGE_GENERATION_PLAN.md) | 图片生成、参考图修改与运行组件 |
 

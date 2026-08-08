@@ -1,14 +1,13 @@
-# ShotAI 1.2 功能说明
+# ShotAI 当前功能说明
 
-> 本文按当前工作区准备发布的 ShotAI 1.2 功能编写。
-> 当前根目录 package.json 与 portal/package.json 中的版本号仍为 1.1.3；
-> 正式发布 1.2 前，请同步修改两个版本号并更新 CHANGELOG.md。
+> 本文对应当前工作区已经实现的能力。具体发布版本以根目录
+> `package.json` 和 `CHANGELOG.md` 为准。
 
 <p align="center">
   <img src="images/shotai-product-preview.png" alt="ShotAI 工作台预览" width="900" />
 </p>
 
-ShotAI 1.2 是一个运行在本地硬件和可信局域网中的 AI 工作台。它不重新实现模型推理，而是把 Ollama、文档解析、知识检索、视觉理解、图片创作和 Windows 内网交付组织成一套可使用、可检查、可部署的工具。
+ShotAI 是一个运行在本地硬件和可信局域网中的 AI 工作台。它不重新实现模型推理，而是把 Ollama、文档解析、知识检索、视觉理解、图片创作和 Windows 内网交付组织成一套可使用、可检查、可部署的工具。
 
 ## 这一版适合谁
 
@@ -22,7 +21,7 @@ ShotAI 适合以下场景：
 
 它不是公网多租户 SaaS，也不是带账号体系的云端服务。当前版本应部署在可信、受控的局域网中。
 
-## 1.2 的核心能力
+## 当前核心能力
 
 ### 1. 本地流式对话
 
@@ -126,7 +125,7 @@ ShotAI 主机通过同源服务提供：
 
 ### 8. Windows Electron 桌面客户端
 
-1.2 的 Windows 桌面交付基于 Electron：
+当前 Windows 桌面交付基于 Electron：
 
 - 提供独立桌面窗口；
 - 提供任务栏图标和托盘菜单；
@@ -242,7 +241,7 @@ ShotAI 的本地数据主要保存在当前浏览器 IndexedDB，包括：
 
 ## 当前已知边界
 
-以下能力不属于当前 1.2 已实现范围：
+以下能力不属于当前已实现范围：
 
 - 账号登录和多租户；
 - 细分角色权限与用户隔离；
@@ -255,7 +254,7 @@ ShotAI 的本地数据主要保存在当前浏览器 IndexedDB，包括：
 
 ## 适合写入 GitHub Release 的内容
 
-发布 1.2 时，建议在 GitHub Release 中使用以下结构：
+发布新版本时，建议在 GitHub Release 中使用以下结构：
 
 1. 一句话说明：本版本把本地对话、视觉、知识库、图片修改和 Windows 内网交付整合到同一工作台。
 2. 列出新增能力：参考图修改、GGUF 完整性校验、Electron 客户端、门户 GitHub 入口。
@@ -272,4 +271,3 @@ ShotAI 的本地数据主要保存在当前浏览器 IndexedDB，包括：
 - [Electron Windows 客户端](ELECTRON_WINDOWS_GUIDE.md)：桌面客户端与安装方式
 - [开发与代码更新流程](DEVELOPMENT_WORKFLOW.md)：独立的 Git 工作流和验证流程
 - [更新记录](../CHANGELOG.md)：按版本整理的变化
-

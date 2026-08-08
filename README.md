@@ -120,7 +120,7 @@ ShotAI 会根据任务使用对应能力，不要求使用者频繁手动切换�
 | 第一次安装和使用 | [第一次使用指南](docs/USER_GUIDE.md) |
 | 在单位局域网中运行 | [内网部署与排错](docs/LAN_DEPLOYMENT.md) |
 | Windows 客户端与打包 | [Electron 客户端说明](docs/ELECTRON_WINDOWS_GUIDE.md) |
-| 当前功能与边界 | [1.2 功能说明](docs/SHOTAI_1.2_FEATURES.md) |
+| 当前功能与边界 | [当前功能说明](docs/CURRENT_FEATURES.md) |
 | 开发、检查和发布 | [开发流程](docs/DEVELOPMENT_WORKFLOW.md) |
 | 查看全部说明 | [文档中心](docs/README.md) |
 

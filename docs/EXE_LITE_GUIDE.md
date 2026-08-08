@@ -1,4 +1,4 @@
-# ShotAI 1.1 EXE 精简预览版
+# ShotAI Windows EXE 精简预览版
 
 这是 ShotAI 的轻量 Windows x64 启动包。它提供真正的 `ShotAI.exe`，不使用
 Electron，也不包含模型权重和大型第三方运行组件。
@@ -35,7 +35,7 @@ runtime/ollama/
 ## 本地目录
 
 ```text
-ShotAI-1.1.0-EXE-Lite/
+ShotAI-EXE-Lite/
 ├─ ShotAI.exe
 ├─ web/
 ├─ models/
