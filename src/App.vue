@@ -21,7 +21,9 @@ import {
   DocumentAdd,
   Download,
   EditPen,
+  Expand,
   Files,
+  Fold,
   FolderOpened,
   Lock,
   MagicStick,
@@ -232,6 +234,8 @@ interface BubbleListExpose {
 const activeView = ref<ViewKey>('chat')
 const activeConversation = ref<string>('c-default')
 const sidebarOpen = ref(false)
+const SIDEBAR_COLLAPSED_KEY = 'shotai:conversation-sidebar-collapsed'
+const sidebarCollapsed = ref(false)
 const darkMode = ref(true)
 const showReasoning = ref(false)
 const modelDrawerOpen = ref(false)
@@ -478,6 +482,37 @@ function isImageGenerationModel(model: LocalModel) {
 
 const imageGenerationModels = computed(() =>
   models.filter(isImageGenerationModel),
+)
+
+type ManagedModelSectionKey = 'conversation' | 'knowledge' | 'image'
+
+const managedModelSections = computed(() => [
+  {
+    key: 'conversation' as ManagedModelSectionKey,
+    title: '对话与图片识别',
+    description: '用于日常对话、阅读文档和识别上传的图片',
+    models: models.filter(
+      (model) =>
+        !model.capabilities.includes('embedding') &&
+        !isImageGenerationModel(model),
+    ),
+  },
+  {
+    key: 'knowledge' as ManagedModelSectionKey,
+    title: '资料查找',
+    description: '帮助系统从本地资料中更准确地找到相关内容',
+    models: embeddingModels.value,
+  },
+  {
+    key: 'image' as ManagedModelSectionKey,
+    title: '图片生成与修改',
+    description: '负责生成图片、以图生图和修改已有图片',
+    models: imageGenerationModels.value,
+  },
+])
+
+const managedModelCount = computed(
+  () => models.length + (imageRuntime.value.modelFiles.length ? 1 : 0),
 )
 
 interface ImageProviderOption {
@@ -1338,6 +1373,10 @@ function nowTime() {
   }).format(new Date())
 }
 
+function toggleConversationSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+}
+
 function switchView(view: ViewKey) {
   activeView.value = view
   sidebarOpen.value = false
@@ -2042,6 +2081,13 @@ function openImageStudio() {
     imageModelId.value = AUTO_IMAGE_PROVIDER_ID
   }
   void refreshImageRuntime()
+}
+
+function openUnifiedModelManagement() {
+  imageStudioOpen.value = false
+  settingsDrawerOpen.value = false
+  modelDrawerOpen.value = true
+  void Promise.all([refreshOllama(), refreshImageRuntime()])
 }
 
 function getImageGenerationError(error: unknown) {
@@ -3633,10 +3679,52 @@ function finishImport() {
   )
 }
 
-function setModel(model: LocalModel) {
+function isManagedModelSelected(
+  model: LocalModel,
+  section: ManagedModelSectionKey,
+) {
+  if (section === 'knowledge') return embeddingModelId.value === model.id
+  if (section === 'image') {
+    return selectedImageProvider.value?.id === `ollama:${model.id}`
+  }
+  return currentModelId.value === model.id
+}
+
+function managedModelActionLabel(
+  model: LocalModel,
+  section: ManagedModelSectionKey,
+) {
+  if (isManagedModelSelected(model, section)) return '使用中'
+  if (section === 'knowledge') return '用于资料'
+  if (section === 'image') return '用于创作'
+  return '用于对话'
+}
+
+function useManagedModel(
+  model: LocalModel,
+  section: ManagedModelSectionKey,
+) {
+  if (section === 'knowledge') {
+    embeddingModelId.value = model.id
+    ElMessage.success(`资料查找将使用 ${model.name}`)
+    return
+  }
+  if (section === 'image') {
+    imageModelId.value = `ollama:${model.id}`
+    ElMessage.success(`图片创作将使用 ${model.name}`)
+    return
+  }
   currentModelId.value = model.id
-  modelDrawerOpen.value = false
-  ElMessage.success(`已切换到 ${model.name}`)
+  ElMessage.success(`当前对话将使用 ${model.name}`)
+}
+
+function useLocalImageRuntime() {
+  if (!imageRuntime.value.serviceOnline) {
+    ElMessage.warning('图片模型还没有成功载入，请先检查文件和运行状态')
+    return
+  }
+  imageModelId.value = 'local-runtime'
+  ElMessage.success(`图片创作将使用 ${imageRuntime.value.modelLabel}`)
 }
 
 async function removeModel(model: LocalModel) {
@@ -3708,6 +3796,14 @@ function applyDocumentTheme(enabled: boolean) {
 
 watch(darkMode, applyDocumentTheme, { immediate: true })
 
+watch(sidebarCollapsed, (collapsed) => {
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0')
+  } catch {
+    // Browsers with restricted storage can still use the control for this session.
+  }
+})
+
 watch(
   [conversations, activeConversation, darkMode, showReasoning],
   scheduleWorkspaceSave,
@@ -3722,6 +3818,12 @@ watch(
 
 onMounted(async () => {
   window.addEventListener('keydown', handleGlobalKeydown)
+  try {
+    sidebarCollapsed.value =
+      window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
+  } catch {
+    sidebarCollapsed.value = false
+  }
   await Promise.all([
     restoreWorkspace(),
     restoreKnowledge(),
@@ -3760,26 +3862,58 @@ onBeforeUnmount(() => {
   <el-config-provider namespace="el">
     <div
       class="shot-app"
-      :class="{ dark: darkMode, 'theme-light': !darkMode }"
+      :class="{
+        dark: darkMode,
+        'theme-light': !darkMode,
+        'sidebar-collapsed': sidebarCollapsed,
+      }"
     >
       <a class="skip-link" href="#main-content">跳转到主要内容</a>
 
-      <aside class="app-sidebar" :class="{ 'is-open': sidebarOpen }">
+      <aside
+        id="conversation-sidebar"
+        class="app-sidebar"
+        :class="{
+          'is-open': sidebarOpen,
+          'is-collapsed': sidebarCollapsed,
+        }"
+        aria-label="对话导航"
+      >
         <div class="brand-block">
           <div class="brand-mark" aria-hidden="true">
             <img :src="appLogoUrl" alt="" />
           </div>
-          <div>
+          <div class="brand-copy">
             <div class="brand-name">SHOT<span>AI</span></div>
             <div class="brand-subtitle">完全离线的智能助手</div>
           </div>
         </div>
-        <el-button class="new-chat-button" type="primary" @click="createConversation">
+        <button
+          class="sidebar-collapse-toggle"
+          type="button"
+          :aria-label="sidebarCollapsed ? '展开对话侧边栏' : '折叠对话侧边栏'"
+          :aria-expanded="!sidebarCollapsed"
+          aria-controls="conversation-sidebar"
+          :title="sidebarCollapsed ? '展开对话侧边栏' : '折叠对话侧边栏'"
+          @click="toggleConversationSidebar"
+        >
+          <el-icon><Expand v-if="sidebarCollapsed" /><Fold v-else /></el-icon>
+        </button>
+        <el-button
+          class="new-chat-button"
+          type="primary"
+          aria-label="新建对话"
+          :title="sidebarCollapsed ? '新建对话' : undefined"
+          @click="createConversation"
+        >
           <el-icon><Plus /></el-icon>
-          新建对话
+          <span class="sidebar-button-label">新建对话</span>
         </el-button>
 
-        <div class="conversation-section">
+        <div
+          v-show="!sidebarCollapsed || sidebarOpen"
+          class="conversation-section"
+        >
           <div class="section-label"><span>对话记录</span></div>
           <el-input
             v-model="conversationSearch"
@@ -3807,11 +3941,30 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="sidebar-footer">
-          <button class="settings-entry" type="button" @click="switchView('settings')">
-            <el-icon><Setting /></el-icon>
-            <span>设置</span>
+          <button
+            class="settings-entry"
+            type="button"
+            aria-label="打开模型管理"
+            :title="sidebarCollapsed ? '模型管理' : undefined"
+            @click="switchView('models')"
+          >
+            <el-icon><Cpu /></el-icon>
+            <span class="sidebar-button-label">模型管理</span>
           </button>
-          <div class="offline-seal">
+          <button
+            class="settings-entry"
+            type="button"
+            aria-label="侧边栏设置"
+            :title="sidebarCollapsed ? '设置' : undefined"
+            @click="switchView('settings')"
+          >
+            <el-icon><Setting /></el-icon>
+            <span class="sidebar-button-label">设置</span>
+          </button>
+          <div
+            class="offline-seal"
+            :title="`${ollamaStateLabel} · 版本 ${ollamaVersion}`"
+          >
             <span
               class="status-dot"
               :class="{
@@ -3822,7 +3975,7 @@ onBeforeUnmount(() => {
               }"
               aria-hidden="true"
             ></span>
-            <div>
+            <div class="sidebar-status-copy">
               <strong>{{ ollamaStateLabel }}</strong>
               <span>版本 {{ ollamaVersion }}</span>
             </div>
@@ -4807,37 +4960,15 @@ onBeforeUnmount(() => {
                   </el-select>
                   <small>只有需要固定使用某个图片模型时才需要更改。</small>
 
-                  <template v-if="systemInfo.canManage">
-                    <div class="image-model-file-heading">
-                      <span>主机上的图片模型文件</span>
-                      <el-button
-                        text
-                        size="small"
-                        :loading="imageModelImporting"
-                        @click="openImageModelPicker"
-                      >
-                        添加模型
-                      </el-button>
-                    </div>
-                    <div class="image-model-file-list">
-                      <div
-                        v-for="fileName in imageRuntime.modelFiles"
-                        :key="fileName"
-                      >
-                        <span>{{ fileName }}</span>
-                        <el-button
-                          text
-                          type="danger"
-                          size="small"
-                          :disabled="imageGenerating || imageModelImporting"
-                          :aria-label="`删除 ${fileName}`"
-                          @click="removeImageModelFile(fileName)"
-                        >
-                          <el-icon><Delete /></el-icon>
-                        </el-button>
-                      </div>
-                    </div>
-                  </template>
+                  <div class="image-model-management-shortcut">
+                    <span>
+                      <strong>模型文件统一管理</strong>
+                      <small>添加、删除和检查图片模型请前往模型管理</small>
+                    </span>
+                    <el-button @click="openUnifiedModelManagement">
+                      打开模型管理
+                    </el-button>
+                  </div>
                 </div>
               </details>
 
@@ -4933,9 +5064,9 @@ onBeforeUnmount(() => {
 
       <el-drawer
         v-model="modelDrawerOpen"
-        class="product-drawer"
+        class="product-drawer unified-model-drawer"
         title="模型管理"
-        size="min(680px, 94vw)"
+        size="min(820px, 94vw)"
         append-to-body
       >
         <template #header>
@@ -4968,8 +5099,10 @@ onBeforeUnmount(() => {
           <div class="storage-summary">
             <div class="storage-icon"><el-icon><Files /></el-icon></div>
             <div class="storage-copy">
-              <strong>已安装的模型</strong>
-              <span>{{ models.length }} 个模型 · 共 {{ totalModelSize }}</span>
+              <strong>统一模型中心</strong>
+              <span>
+                {{ managedModelCount }} 组可用模型 · 对话模型占用 {{ totalModelSize }}
+              </span>
             </div>
             <el-progress
               :percentage="ollamaConnected ? 100 : 0"
@@ -4979,134 +5112,268 @@ onBeforeUnmount(() => {
             <span class="storage-free">版本 {{ ollamaVersion }}</span>
           </div>
 
-          <div class="model-list">
-            <div v-if="models.length === 0" class="model-empty">
-              <strong>{{ ollamaConnected ? '还没有安装模型' : 'AI 服务尚未启动' }}</strong>
+          <section
+            v-for="section in managedModelSections"
+            :key="section.key"
+            class="managed-model-section"
+            :aria-labelledby="`managed-model-${section.key}`"
+          >
+            <div class="managed-model-heading">
+              <div>
+                <h3 :id="`managed-model-${section.key}`">{{ section.title }}</h3>
+                <p>{{ section.description }}</p>
+              </div>
               <span>
                 {{
-                  ollamaConnected
-                    ? '点击“添加模型”，选择下载好的模型文件'
-                    : ollamaError
+                  section.models.length +
+                  (section.key === 'image' && imageRuntime.modelFiles.length ? 1 : 0)
                 }}
+                组
               </span>
             </div>
-            <article
-              v-for="model in models"
-              :key="model.id"
-              class="model-row"
-              :class="{ 'is-current': model.id === currentModelId }"
-            >
-              <div class="model-symbol">{{ model.family.slice(0, 1) }}</div>
-              <div class="model-details">
-                <div class="model-title-line">
-                  <h3>{{ model.name }}</h3>
-                  <el-tag
-                    v-if="model.id === currentModelId"
-                    type="success"
-                    effect="plain"
-                    size="small"
-                  >
-                    当前
-                  </el-tag>
-                </div>
-                <div class="model-specs">
-                  <span>{{ model.size }}</span>
-                  <span
-                    v-if="model.capabilities.includes('vision')"
-                    class="model-capability"
-                  >
-                    支持图片
-                  </span>
-                  <span
-                    v-else-if="model.capabilities.includes('embedding')"
-                    class="model-capability"
-                  >
-                    适合资料查找
-                  </span>
-                  <span
-                    v-if="isImageGenerationModel(model)"
-                    class="model-capability"
-                  >
-                    可以创作图片
-                  </span>
-                  <span
-                    v-if="model.capabilities.includes('thinking')"
-                    class="model-capability"
-                  >
-                    可显示回答思路
-                  </span>
-                  <span v-if="!model.detailsAvailable" class="model-capability muted">
-                    信息待确认
-                  </span>
-                </div>
-              </div>
-              <div class="model-actions">
-                <span class="runtime-state">
-                  <span
-                    class="status-dot"
-                    :class="{ muted: model.status !== 'ready' }"
-                  ></span>
-                  {{ model.status === 'ready' ? '正在使用' : '可以使用' }}
-                </span>
-                <el-button
-                  v-if="model.id !== currentModelId"
-                  @click="setModel(model)"
-                >
-                  使用
-                </el-button>
-                <el-button v-else disabled>
-                  <el-icon><Check /></el-icon>
-                  使用中
-                </el-button>
-                <el-button
-                  v-if="systemInfo.canManage"
-                  class="model-delete-button"
-                  text
-                  type="danger"
-                  :disabled="isGenerating"
-                  :aria-label="`删除 ${model.name}`"
-                  @click="removeModel(model)"
-                >
-                  <el-icon><Delete /></el-icon>
-                </el-button>
-              </div>
-            </article>
-          </div>
 
-          <section class="vision-model-guide">
-            <div class="vision-guide-heading">
-              <div>
-                <span>适合当前电脑</span>
-                <h3>安装可以识别图片的模型</h3>
-              </div>
-              <el-tag type="success" effect="plain">文字和图片</el-tag>
-            </div>
-            <p>
-              点击下方内容即可复制，然后粘贴到运行服务的电脑中进行安装。
-              安装完成后点击“刷新”。
-            </p>
-            <article
-              v-for="recommendation in visionModelRecommendations"
-              :key="recommendation.command"
-              class="vision-recommendation"
-            >
-              <div>
-                <span>
-                  {{ recommendation.label }} · {{ recommendation.size }}
-                </span>
-                <strong>{{ recommendation.name }}</strong>
-                <small>{{ recommendation.note }}</small>
-              </div>
-              <button
-                type="button"
-                :aria-label="`复制 ${recommendation.name} 的安装内容`"
-                @click="copyInstallCommand(recommendation.command)"
+            <div class="model-list managed-model-list">
+              <article
+                v-if="section.key === 'image' && imageRuntime.modelFiles.length"
+                class="model-row local-image-model-row"
+                :class="{
+                  'is-current': selectedImageProvider?.id === 'local-runtime',
+                }"
               >
-                <span>复制安装内容</span>
-                <el-icon><CopyDocument /></el-icon>
-              </button>
-            </article>
+                <div class="model-symbol">图</div>
+                <div class="model-details">
+                  <div class="model-title-line">
+                    <h3>{{ imageRuntime.modelLabel }}</h3>
+                    <el-tag
+                      :type="imageRuntime.serviceOnline ? 'success' : 'warning'"
+                      effect="plain"
+                      size="small"
+                    >
+                      {{ imageRuntime.serviceOnline ? '已载入' : '待检查' }}
+                    </el-tag>
+                  </div>
+                  <div class="model-specs">
+                    <span>{{ imageRuntime.modelFiles.length }} 个组合文件</span>
+                    <span class="model-capability">生成图片</span>
+                    <span class="model-capability">修改图片</span>
+                  </div>
+                </div>
+                <div class="model-actions">
+                  <span class="runtime-state">
+                    <span
+                      class="status-dot"
+                      :class="{ muted: !imageRuntime.serviceOnline }"
+                    ></span>
+                    {{ imageRuntime.serviceOnline ? '运行正常' : '尚未载入' }}
+                  </span>
+                  <el-button
+                    :disabled="
+                      selectedImageProvider?.id === 'local-runtime' ||
+                      !imageRuntime.serviceOnline
+                    "
+                    @click="useLocalImageRuntime"
+                  >
+                    {{
+                      selectedImageProvider?.id === 'local-runtime'
+                        ? '使用中'
+                        : '用于创作'
+                    }}
+                  </el-button>
+                </div>
+              </article>
+
+              <details
+                v-if="section.key === 'image' && imageRuntime.modelFiles.length"
+                class="managed-model-files"
+              >
+                <summary>
+                  查看 {{ imageRuntime.modelFiles.length }} 个图片模型文件
+                </summary>
+                <div>
+                  <div
+                    v-for="fileName in imageRuntime.modelFiles"
+                    :key="fileName"
+                  >
+                    <span>{{ fileName }}</span>
+                    <el-button
+                      v-if="systemInfo.canManage"
+                      text
+                      type="danger"
+                      size="small"
+                      :disabled="imageGenerating || imageModelImporting"
+                      :aria-label="`删除 ${fileName}`"
+                      @click="removeImageModelFile(fileName)"
+                    >
+                      <el-icon><Delete /></el-icon>
+                    </el-button>
+                  </div>
+                </div>
+              </details>
+
+              <article
+                v-for="model in section.models"
+                :key="`${section.key}:${model.id}`"
+                class="model-row"
+                :class="{
+                  'is-current': isManagedModelSelected(model, section.key),
+                }"
+              >
+                <div class="model-symbol">{{ model.family.slice(0, 1) }}</div>
+                <div class="model-details">
+                  <div class="model-title-line">
+                    <h3>{{ model.name }}</h3>
+                    <el-tag
+                      v-if="isManagedModelSelected(model, section.key)"
+                      type="success"
+                      effect="plain"
+                      size="small"
+                    >
+                      当前
+                    </el-tag>
+                  </div>
+                  <div class="model-specs">
+                    <span>{{ model.size }}</span>
+                    <span
+                      v-if="model.capabilities.includes('vision')"
+                      class="model-capability"
+                    >
+                      支持图片
+                    </span>
+                    <span
+                      v-if="model.capabilities.includes('embedding')"
+                      class="model-capability"
+                    >
+                      资料查找
+                    </span>
+                    <span
+                      v-if="isImageGenerationModel(model)"
+                      class="model-capability"
+                    >
+                      图片创作
+                    </span>
+                    <span
+                      v-if="model.capabilities.includes('thinking')"
+                      class="model-capability"
+                    >
+                      回答思路
+                    </span>
+                    <span
+                      v-if="!model.detailsAvailable"
+                      class="model-capability muted"
+                    >
+                      信息待确认
+                    </span>
+                  </div>
+                </div>
+                <div class="model-actions">
+                  <span class="runtime-state">
+                    <span
+                      class="status-dot"
+                      :class="{ muted: model.status !== 'ready' }"
+                    ></span>
+                    {{ model.status === 'ready' ? '已载入' : '可以使用' }}
+                  </span>
+                  <el-button
+                    :disabled="isManagedModelSelected(model, section.key)"
+                    @click="useManagedModel(model, section.key)"
+                  >
+                    <el-icon
+                      v-if="isManagedModelSelected(model, section.key)"
+                    >
+                      <Check />
+                    </el-icon>
+                    {{ managedModelActionLabel(model, section.key) }}
+                  </el-button>
+                  <el-button
+                    v-if="systemInfo.canManage"
+                    class="model-delete-button"
+                    text
+                    type="danger"
+                    :disabled="isGenerating"
+                    :aria-label="`删除 ${model.name}`"
+                    @click="removeModel(model)"
+                  >
+                    <el-icon><Delete /></el-icon>
+                  </el-button>
+                </div>
+              </article>
+
+              <div
+                v-if="
+                  section.models.length === 0 &&
+                  (section.key !== 'image' || !imageRuntime.modelFiles.length)
+                "
+                class="model-empty compact"
+              >
+                <strong>
+                  {{
+                    section.key === 'conversation'
+                      ? ollamaConnected
+                        ? '还没有对话模型'
+                        : 'AI 服务尚未启动'
+                      : section.key === 'knowledge'
+                        ? '尚未添加资料查找模型'
+                        : '尚未添加图片生成模型'
+                  }}
+                </strong>
+                <span>
+                  {{
+                    section.key === 'knowledge'
+                      ? '没有专用模型时仍可使用普通文字查找'
+                      : section.key === 'image'
+                        ? '添加完整图片模型后，可在对话中直接生成和修改图片'
+                        : ollamaError || '点击右上角“添加模型”开始使用'
+                  }}
+                </span>
+              </div>
+            </div>
+
+            <div
+              v-if="section.key === 'image' && imageRuntime.runtimeError"
+              class="vision-model-warning"
+              role="alert"
+            >
+              {{ imageRuntime.runtimeError }}
+            </div>
           </section>
+
+          <details class="vision-model-guide managed-model-guide">
+            <summary>模型推荐与安装帮助</summary>
+            <div class="managed-model-guide-content">
+              <div class="vision-guide-heading">
+                <div>
+                  <span>适合当前电脑</span>
+                  <h3>安装可以识别图片的模型</h3>
+                </div>
+                <el-tag type="success" effect="plain">文字和图片</el-tag>
+              </div>
+              <p>
+                点击下方内容即可复制，然后粘贴到运行服务的电脑中进行安装。
+                安装完成后点击“刷新”。
+              </p>
+              <article
+                v-for="recommendation in visionModelRecommendations"
+                :key="recommendation.command"
+                class="vision-recommendation"
+              >
+                <div>
+                  <span>
+                    {{ recommendation.label }} · {{ recommendation.size }}
+                  </span>
+                  <strong>{{ recommendation.name }}</strong>
+                  <small>{{ recommendation.note }}</small>
+                </div>
+                <button
+                  type="button"
+                  :aria-label="`复制 ${recommendation.name} 的安装内容`"
+                  @click="copyInstallCommand(recommendation.command)"
+                >
+                  <span>复制安装内容</span>
+                  <el-icon><CopyDocument /></el-icon>
+                </button>
+              </article>
+            </div>
+          </details>
 
           <button
             v-if="systemInfo.canManage"

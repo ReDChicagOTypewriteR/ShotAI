@@ -27,7 +27,7 @@ try {
   await page.route('**/shotai/system', (route) =>
     route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ version: '1.1.5', isHost: true, canManage: true, port: 9090 }),
+      body: JSON.stringify({ version: '1.1.6', isHost: true, canManage: true, port: 9090 }),
     }),
   )
   await page.route('**/image-runtime/status', (route) =>
