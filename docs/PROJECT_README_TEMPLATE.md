@@ -7,15 +7,36 @@
 -->
 
 <p align="center">
-  <a href="{产品网站或项目地址}">
-    <img src="{品牌头图路径}" alt="{项目名称} — {一句话定位}" />
-  </a>
+  <img src="{Logo 路径}" width="64" height="64" alt="{项目名称}" />
+</p>
+
+<h1 align="center">{项目图标或 Emoji} {项目名称} · {简短项目定位}</h1>
+
+<p align="center">
+  <strong>{一句话说明项目为谁解决什么问题}</strong>
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/VERSION-{版本号}-111111?style=for-the-badge" />
-  <img alt="Platform" src="https://img.shields.io/badge/PLATFORM-{运行平台}-111111?style=for-the-badge" />
-  <img alt="Status" src="https://img.shields.io/badge/STATUS-{项目状态}-111111?style=for-the-badge" />
+  <img alt="Build" src="https://img.shields.io/badge/build-{构建状态}-{状态颜色}?style=flat&amp;logo=githubactions&amp;logoColor=white" />
+  <img alt="Version" src="https://img.shields.io/badge/version-{版本号}-2496ed?style=flat" />
+  <img alt="Technology" src="https://img.shields.io/badge/{主要技术}-{技术版本}-{品牌颜色}?style=flat&amp;logo={Simple Icons 图标名}&amp;logoColor=white" />
+  <img alt="Platform" src="https://img.shields.io/badge/platform-{运行平台}-475569?style=flat" />
+  <img alt="Docs" src="https://img.shields.io/badge/docs-included-8b5cf6?style=flat&amp;logo=readthedocs&amp;logoColor=white" />
+</p>
+
+<p align="center">
+  <a href="{GitHub 仓库地址}"><img alt="GitHub Repository" src="https://img.shields.io/badge/GitHub-Repository-24292f?style=flat&amp;logo=github&amp;logoColor=white" /></a>
+  <a href="{GitHub Issues 地址}"><img alt="GitHub Issues" src="https://img.shields.io/badge/GitHub-Issues-24292f?style=flat&amp;logo=github&amp;logoColor=white" /></a>
+  <a href="{GitHub Star 地址}"><img alt="Star Project" src="https://img.shields.io/badge/Star-{项目名称}-f59e0b?style=flat&amp;logo=githubsponsors&amp;logoColor=white" /></a>
+  <a href="{文档地址}"><img alt="Documentation" src="https://img.shields.io/badge/Project-Documentation-7c3aed?style=flat&amp;logo=readthedocs&amp;logoColor=white" /></a>
+</p>
+
+<br />
+
+<p align="center">
+  <a href="{产品网站或项目地址}">
+    <img src="{品牌头图路径}" alt="{项目名称} — {一句话定位}" />
+  </a>
 </p>
 
 <p align="center">

@@ -1,14 +1,38 @@
 <p align="center">
-  <a href="http://alexjoker.top/projects/ShotAI/">
-    <img src="docs/images/readme-hero.svg" alt="ShotAI — 本地 AI，为整个局域网服务" />
-  </a>
+  <img src="docs/images/shotai-logo.svg" width="64" height="64" alt="ShotAI" />
+</p>
+
+<h1 align="center">🛰️ ShotAI · 局域网本地 AI 工作台</h1>
+
+<p align="center">
+  <strong>一台主机运行模型，其他电脑打开浏览器即可使用。</strong>
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/VERSION-1.1.6-111111?style=for-the-badge" />
-  <img alt="Windows" src="https://img.shields.io/badge/WINDOWS-ELECTRON-111111?style=for-the-badge" />
-  <img alt="Local AI" src="https://img.shields.io/badge/AI-LOCAL_FIRST-111111?style=for-the-badge" />
-  <img alt="LAN" src="https://img.shields.io/badge/LAN-PORT_9090-111111?style=for-the-badge" />
+  <img alt="Build verified" src="https://img.shields.io/badge/build-verified-2ea44f?style=flat&amp;logo=githubactions&amp;logoColor=white" />
+  <img alt="Version 1.1.6" src="https://img.shields.io/badge/version-v1.1.6-2496ed?style=flat" />
+  <img alt="Vue 3.5.40" src="https://img.shields.io/badge/Vue-3.5.40-42b883?style=flat&amp;logo=vuedotjs&amp;logoColor=white" />
+  <img alt="Electron 43.2.0" src="https://img.shields.io/badge/Electron-43.2.0-47848f?style=flat&amp;logo=electron&amp;logoColor=white" />
+  <img alt="TypeScript 5.9.3" src="https://img.shields.io/badge/TypeScript-5.9.3-3178c6?style=flat&amp;logo=typescript&amp;logoColor=white" />
+  <img alt="Ollama supported" src="https://img.shields.io/badge/Ollama-supported-111111?style=flat&amp;logo=ollama&amp;logoColor=white" />
+  <img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078d4?style=flat&amp;logo=windows11&amp;logoColor=white" />
+  <img alt="Documentation included" src="https://img.shields.io/badge/docs-included-8b5cf6?style=flat&amp;logo=readthedocs&amp;logoColor=white" />
+</p>
+
+<p align="center">
+  <a href="https://github.com/ReDChicagOTypewriteR/ShotAI"><img alt="GitHub Repository" src="https://img.shields.io/badge/GitHub-Repository-24292f?style=flat&amp;logo=github&amp;logoColor=white" /></a>
+  <a href="https://github.com/ReDChicagOTypewriteR/ShotAI/issues"><img alt="GitHub Issues" src="https://img.shields.io/badge/GitHub-Issues-24292f?style=flat&amp;logo=github&amp;logoColor=white" /></a>
+  <a href="https://github.com/ReDChicagOTypewriteR/ShotAI/stargazers"><img alt="Star ShotAI" src="https://img.shields.io/badge/Star-ShotAI-f59e0b?style=flat&amp;logo=githubsponsors&amp;logoColor=white" /></a>
+  <a href="CHANGELOG.md"><img alt="Changelog" src="https://img.shields.io/badge/Project-Changelog-475569?style=flat&amp;logo=gitbook&amp;logoColor=white" /></a>
+  <a href="docs/README.md"><img alt="Documentation" src="https://img.shields.io/badge/Project-Documentation-7c3aed?style=flat&amp;logo=readthedocs&amp;logoColor=white" /></a>
+</p>
+
+<br />
+
+<p align="center">
+  <a href="http://alexjoker.top/projects/ShotAI/">
+    <img src="docs/images/readme-hero.svg" alt="ShotAI — 本地 AI，为整个局域网服务" />
+  </a>
 </p>
 
 <p align="center">
