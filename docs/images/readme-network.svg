@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 410" role="img" aria-labelledby="title desc">
+  <title id="title">ShotAI 局域网运行方式</title>
+  <desc id="desc">局域网浏览器连接 ShotAI 主机，再由主机调用 Ollama 和本地图片组件。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#080a0c"/><stop offset="1" stop-color="#101519"/>
+    </linearGradient>
+    <linearGradient id="active" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#5b676e"/><stop offset="0.5" stop-color="#e9edef"/><stop offset="1" stop-color="#74f7c5"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 10 5 0 10Z" fill="#9ba4aa"/>
+    </marker>
+  </defs>
+  <rect width="1440" height="410" rx="22" fill="url(#bg)"/>
+  <path d="M42 74h1356" stroke="#293036"/>
+  <text x="42" y="46" fill="#f0f3f4" font-family="Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="2.5">LOCAL-FIRST ARCHITECTURE</text>
+  <text x="1398" y="46" text-anchor="end" fill="#69737a" font-family="Arial, sans-serif" font-size="11" letter-spacing="1.5">PRIVATE LAN / PORT 9090</text>
+
+  <g font-family="Arial, 'PingFang SC', sans-serif">
+    <text x="84" y="112" fill="#737e85" font-size="11" letter-spacing="2">01 / CLIENTS</text>
+    <rect x="82" y="138" width="275" height="84" rx="13" fill="#101418" stroke="#353d43"/>
+    <rect x="100" y="156" width="58" height="42" rx="5" fill="#080a0c" stroke="#657078"/>
+    <path d="M110 187h38M129 199v8M115 207h28" stroke="#8e989e" stroke-width="2" stroke-linecap="round"/>
+    <text x="180" y="174" fill="#e9edef" font-size="14" font-weight="700">内网电脑 A</text>
+    <text x="180" y="195" fill="#737e85" font-size="11">只需浏览器</text>
+    <rect x="82" y="238" width="275" height="84" rx="13" fill="#101418" stroke="#353d43"/>
+    <rect x="100" y="256" width="58" height="42" rx="5" fill="#080a0c" stroke="#657078"/>
+    <path d="M110 287h38M129 299v8M115 307h28" stroke="#8e989e" stroke-width="2" stroke-linecap="round"/>
+    <text x="180" y="274" fill="#e9edef" font-size="14" font-weight="700">内网电脑 B</text>
+    <text x="180" y="295" fill="#737e85" font-size="11">无需安装模型</text>
+
+    <path d="M380 230h130" stroke="#9ba4aa" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <text x="445" y="215" text-anchor="middle" fill="#69737a" font-size="10">HTTP</text>
+
+    <text x="532" y="112" fill="#737e85" font-size="11" letter-spacing="2">02 / SHOTAI HOST</text>
+    <rect x="512" y="138" width="416" height="184" rx="18" fill="#0c1013" stroke="#707a81"/>
+    <rect x="534" y="160" width="372" height="42" rx="9" fill="#f1f4f5"/>
+    <circle cx="555" cy="181" r="4" fill="#12a671"/>
+    <text x="570" y="186" fill="#0a0d0f" font-size="13" font-weight="700">SHOTAI · 服务在线</text>
+    <text x="882" y="186" text-anchor="end" fill="#536068" font-size="11">9090</text>
+    <g fill="#13191d" stroke="#30383e">
+      <rect x="534" y="220" width="112" height="72" rx="10"/>
+      <rect x="658" y="220" width="112" height="72" rx="10"/>
+      <rect x="782" y="220" width="124" height="72" rx="10"/>
+    </g>
+    <g fill="#dfe4e7" font-size="11" font-weight="700" text-anchor="middle">
+      <text x="590" y="251">网页工作台</text><text x="714" y="251">文件与资料</text><text x="844" y="251">模型管理</text>
+    </g>
+    <g fill="#68737a" font-size="9" text-anchor="middle">
+      <text x="590" y="270">对话与交互</text><text x="714" y="270">本地处理</text><text x="844" y="270">自动分工</text>
+    </g>
+
+    <path d="M952 230h130" stroke="url(#active)" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <text x="1017" y="215" text-anchor="middle" fill="#69737a" font-size="10">LOCAL API</text>
+
+    <text x="1104" y="112" fill="#737e85" font-size="11" letter-spacing="2">03 / RUNTIMES</text>
+    <rect x="1082" y="138" width="276" height="84" rx="13" fill="#101418" stroke="#353d43"/>
+    <circle cx="1121" cy="180" r="21" fill="#07090b" stroke="#59646b"/>
+    <path d="M1111 185c8-1 14-7 20-19" fill="none" stroke="#e8ecee" stroke-width="2"/>
+    <text x="1158" y="176" fill="#e9edef" font-size="14" font-weight="700">OLLAMA</text>
+    <text x="1158" y="197" fill="#737e85" font-size="11">对话 · 识图 · 检索</text>
+    <rect x="1082" y="238" width="276" height="84" rx="13" fill="#101418" stroke="#353d43"/>
+    <circle cx="1121" cy="280" r="21" fill="#07090b" stroke="#59646b"/>
+    <rect x="1111" y="270" width="20" height="20" rx="4" fill="none" stroke="#74f7c5"/>
+    <circle cx="1126" cy="275" r="3" fill="#74f7c5"/>
+    <path d="m1113 287 6-7 4 4 4-5 4 8" fill="none" stroke="#74f7c5"/>
+    <text x="1158" y="276" fill="#e9edef" font-size="14" font-weight="700">IMAGE ENGINE</text>
+    <text x="1158" y="297" fill="#737e85" font-size="11">生成 · 参考图修改</text>
+  </g>
+
+  <circle cx="42" cy="367" r="4" fill="#74f7c5"/>
+  <text x="58" y="371" fill="#727d84" font-family="Arial, 'PingFang SC', sans-serif" font-size="11">模型与计算集中在主机，客户端只负责显示网页与提交任务。</text>
+</svg>

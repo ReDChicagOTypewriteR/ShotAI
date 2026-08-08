@@ -188,10 +188,10 @@ git push
 npm run build
 cd portal && npm run build && cd ..
 git add package.json portal/package.json CHANGELOG.md
-git commit -m "Release v1.1.4"
-git tag -a v1.1.4 -m "ShotAI v1.1.4"
+git commit -m "Release vX.Y.Z"
+git tag -a vX.Y.Z -m "ShotAI vX.Y.Z"
 git push origin main
-git push origin v1.1.4
+git push origin vX.Y.Z
 ~~~
 
 ### 选择正确的交付包
@@ -292,4 +292,3 @@ git restore --staged release/ dist/ portal/dist/
 - [Electron Windows 客户端](ELECTRON_WINDOWS_GUIDE.md)：桌面客户端与安装方式
 - [产品架构](PRODUCT_ARCHITECTURE.md)：模块关系和数据流
 - [ShotAI 主 README](../README.md)：项目定位、能力边界和快速开始
-

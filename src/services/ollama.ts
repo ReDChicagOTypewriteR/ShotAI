@@ -394,7 +394,10 @@ export async function calculateFileSha256(
   return hasher.digest('hex')
 }
 
-export async function verifyGgufFile(file: File) {
+export async function verifyGgufFile(
+  file: File,
+  options: { allowMissingMetadata?: boolean } = {},
+) {
   if (!file.name.toLowerCase().endsWith('.gguf')) {
     throw new OllamaApiError('请选择以 .gguf 结尾的模型文件')
   }
@@ -424,9 +427,12 @@ export async function verifyGgufFile(file: File) {
   if (!Number.isSafeInteger(tensorCount) || tensorCount <= 0) {
     throw new OllamaApiError('这个模型文件没有可用的模型数据，请重新下载')
   }
-  if (!Number.isSafeInteger(metadataCount) || metadataCount <= 0) {
+  if (
+    (!Number.isSafeInteger(metadataCount) || metadataCount <= 0) &&
+    !options.allowMissingMetadata
+  ) {
     throw new OllamaApiError(
-      '这个 GGUF 文件缺少模型说明信息，无法判断它是什么模型。它可能是旧版图片配套文件或未完整的下载，请从同一模型下载页重新获取主模型和 mmproj 配套文件。',
+      '这个 GGUF 文件缺少模型说明信息，无法作为聊天或图片识别模型导入。如果它是图片生成模型，请把同一下载页中的图片主模型和配套文件一起选择。',
     )
   }
 }

@@ -1,4 +1,4 @@
-# ShotAI 1.1 可选图片组件 · CUDA 12
+# ShotAI Windows 可选图片组件 · CUDA 12
 
 这个包用于给 ShotAI Windows EXE 增加“创作图片”功能，适合支持 CUDA 12 的
 NVIDIA 显卡。包内不含图片模型，因此仍需自行准备模型文件。

@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 500" role="img" aria-labelledby="title desc">
+  <title id="title">ShotAI 本地 AI 工作台</title>
+  <desc id="desc">黑色极简风格的 ShotAI 项目头图，展示对话、文件、视觉与图片创作能力。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#050709"/>
+      <stop offset="0.58" stop-color="#0a0d10"/>
+      <stop offset="1" stop-color="#11161a"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#f5f7f8" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#f5f7f8" stop-opacity="0.7"/>
+      <stop offset="1" stop-color="#74f7c5" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-opacity="0.035"/>
+    </pattern>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
+  </defs>
+
+  <rect width="1440" height="500" rx="24" fill="url(#bg)"/>
+  <rect width="1440" height="500" rx="24" fill="url(#grid)"/>
+  <path d="M0 430 830 0" stroke="#ffffff" stroke-opacity="0.045" stroke-width="2"/>
+  <path d="M340 500 1200 0" stroke="#ffffff" stroke-opacity="0.03"/>
+  <circle cx="1135" cy="248" r="180" fill="none" stroke="#ffffff" stroke-opacity="0.06"/>
+  <circle cx="1135" cy="248" r="125" fill="none" stroke="#74f7c5" stroke-opacity="0.09"/>
+  <circle cx="1238" cy="170" r="6" fill="#74f7c5" filter="url(#glow)"/>
+  <circle cx="1238" cy="170" r="3" fill="#74f7c5"/>
+
+  <g transform="translate(74 68)">
+    <rect width="54" height="54" rx="13" fill="#0b0d0f" stroke="#495057"/>
+    <path d="M10 40c14-3 25-12 35-30" fill="none" stroke="#f4f6f8" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="m27 29 6-14 12-5-4 12-14 7Z" fill="#f4f6f8"/>
+    <path d="M15 44h30" stroke="#f4f6f8" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <text x="148" y="90" fill="#ffffff" font-family="Arial, 'PingFang SC', sans-serif" font-size="19" font-weight="700" letter-spacing="5">SHOTAI</text>
+  <text x="148" y="116" fill="#8b949b" font-family="Arial, 'PingFang SC', sans-serif" font-size="11" letter-spacing="2.5">LOCAL INTELLIGENCE / PRIVATE NETWORK</text>
+
+  <text x="74" y="230" fill="#f6f8fa" font-family="Arial, 'PingFang SC', sans-serif" font-size="68" font-weight="700" letter-spacing="-2">本地 AI，</text>
+  <text x="74" y="306" fill="#f6f8fa" font-family="Arial, 'PingFang SC', sans-serif" font-size="68" font-weight="700" letter-spacing="-2">为整个局域网服务。</text>
+  <text x="78" y="354" fill="#9da5ab" font-family="Arial, 'PingFang SC', sans-serif" font-size="18">一台主机运行模型，其他电脑打开浏览器即可使用。</text>
+
+  <rect x="76" y="400" width="114" height="34" rx="17" fill="#f4f6f8"/>
+  <text x="133" y="422" text-anchor="middle" fill="#090b0d" font-family="Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="1.8">VERSION 1.1.6</text>
+  <text x="212" y="422" fill="#7d868d" font-family="Arial, sans-serif" font-size="11" letter-spacing="1.8">OFFLINE · WINDOWS · PORT 9090</text>
+
+  <g transform="translate(900 92)" font-family="Arial, 'PingFang SC', sans-serif">
+    <rect width="436" height="316" rx="18" fill="#090c0e" stroke="#333a40"/>
+    <rect x="22" y="22" width="392" height="38" rx="9" fill="#11161a" stroke="#252c31"/>
+    <circle cx="42" cy="41" r="4" fill="#74f7c5"/>
+    <text x="56" y="45" fill="#dfe4e7" font-size="12" font-weight="700">主机服务在线</text>
+    <text x="370" y="45" text-anchor="end" fill="#7d868d" font-size="10">:9090</text>
+
+    <path d="M218 82v36M218 170v36M132 144h172" stroke="#4c565d" stroke-dasharray="4 6"/>
+    <circle cx="218" cy="144" r="28" fill="#f3f5f6"/>
+    <path d="M204 151c11-2 20-10 28-27" fill="none" stroke="#090b0d" stroke-width="2" stroke-linecap="round"/>
+    <path d="m218 141 5-11 9-6-3 10-11 7Z" fill="#090b0d"/>
+
+    <g fill="#11161a" stroke="#30383e">
+      <rect x="34" y="91" width="124" height="56" rx="10"/>
+      <rect x="278" y="91" width="124" height="56" rx="10"/>
+      <rect x="34" y="201" width="124" height="56" rx="10"/>
+      <rect x="278" y="201" width="124" height="56" rx="10"/>
+    </g>
+    <g fill="#e7eaec" font-size="12" font-weight="700" text-anchor="middle">
+      <text x="96" y="116">CHAT</text><text x="340" y="116">VISION</text>
+      <text x="96" y="226">FILES</text><text x="340" y="226">CREATE</text>
+    </g>
+    <g fill="#717b82" font-size="10" text-anchor="middle">
+      <text x="96" y="134">本地对话</text><text x="340" y="134">图片理解</text>
+      <text x="96" y="244">文件与资料</text><text x="340" y="244">图片生成修改</text>
+    </g>
+    <path d="M22 282h392" stroke="url(#line)"/>
+    <text x="22" y="303" fill="#667078" font-size="9" letter-spacing="1.5">ONE HOST / MULTIPLE BROWSERS / LOCAL DATA</text>
+  </g>
+</svg>

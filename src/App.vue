@@ -21,7 +21,9 @@ import {
   DocumentAdd,
   Download,
   EditPen,
+  Expand,
   Files,
+  Fold,
   FolderOpened,
   Lock,
   MagicStick,
@@ -102,10 +104,11 @@ import {
   generateImageWithLocalRuntime,
   getImageRuntimeStatus,
   restartImageRuntime,
+  reuseOllamaModelFileForImages,
   uploadImageModelFile,
 } from './services/image-runtime'
 import type { ImageRuntimeStatus } from './services/image-runtime'
-import { getShotAISystemInfo } from './services/system'
+import { cleanupModelCache, getShotAISystemInfo } from './services/system'
 import type { ShotAISystemInfo } from './services/system'
 
 type ViewKey = 'chat' | 'models' | 'knowledge' | 'diagnostics' | 'settings'
@@ -231,6 +234,8 @@ interface BubbleListExpose {
 const activeView = ref<ViewKey>('chat')
 const activeConversation = ref<string>('c-default')
 const sidebarOpen = ref(false)
+const SIDEBAR_COLLAPSED_KEY = 'shotai:conversation-sidebar-collapsed'
+const sidebarCollapsed = ref(false)
 const darkMode = ref(true)
 const showReasoning = ref(false)
 const modelDrawerOpen = ref(false)
@@ -303,7 +308,6 @@ function scrollMessagesToBottom(smooth = false) {
   })
 }
 const attachmentInputRef = ref<HTMLInputElement | null>(null)
-const imageModelInputRef = ref<HTMLInputElement | null>(null)
 const isGenerating = ref(false)
 const isStopping = ref(false)
 const senderTextLength = computed(() => senderText.value.length)
@@ -314,6 +318,9 @@ const pendingAttachments = ref<MessageAttachment[]>([])
 const selectedFiles = ref<UploadUserFile[]>([])
 const selectedImportFile = ref<File | null>(null)
 const selectedProjectorFile = ref<File | null>(null)
+const selectedImageImportFiles = ref<File[]>([])
+const importFileShas = ref<Record<string, string>>({})
+const importMode = ref<'chat' | 'image'>('chat')
 const importName = ref('')
 const importSha = ref('')
 const importProjectorSha = ref('')
@@ -339,6 +346,7 @@ const knowledgePersistenceState = ref<
 const knowledgeImporting = ref(false)
 const knowledgeImportProgress = ref(0)
 const knowledgeImportStatus = ref('')
+const modelCacheCleaning = ref(false)
 const selectedKnowledgeBaseId = ref('')
 const embeddingModelId = ref('')
 let chatController: AbortController | undefined
@@ -474,6 +482,37 @@ function isImageGenerationModel(model: LocalModel) {
 
 const imageGenerationModels = computed(() =>
   models.filter(isImageGenerationModel),
+)
+
+type ManagedModelSectionKey = 'conversation' | 'knowledge' | 'image'
+
+const managedModelSections = computed(() => [
+  {
+    key: 'conversation' as ManagedModelSectionKey,
+    title: '对话与图片识别',
+    description: '用于日常对话、阅读文档和识别上传的图片',
+    models: models.filter(
+      (model) =>
+        !model.capabilities.includes('embedding') &&
+        !isImageGenerationModel(model),
+    ),
+  },
+  {
+    key: 'knowledge' as ManagedModelSectionKey,
+    title: '资料查找',
+    description: '帮助系统从本地资料中更准确地找到相关内容',
+    models: embeddingModels.value,
+  },
+  {
+    key: 'image' as ManagedModelSectionKey,
+    title: '图片生成与修改',
+    description: '负责生成图片、以图生图和修改已有图片',
+    models: imageGenerationModels.value,
+  },
+])
+
+const managedModelCount = computed(
+  () => models.length + (imageRuntime.value.modelFiles.length ? 1 : 0),
 )
 
 interface ImageProviderOption {
@@ -778,15 +817,88 @@ const systemChecks = computed(() => [
   },
 ])
 
+function isImageGenerationMainFile(file: File) {
+  return (
+    /flux.?2.*klein|z.?image.*turbo/i.test(file.name) &&
+    !/qwen|text.?encoder|vae|(?:^|[-_.])ae(?:[-_.]|$)/i.test(file.name)
+  )
+}
+
+function isImageVaeFile(file: File) {
+  return (
+    /flux.?2.*vae|(?:^|[-_.])vae(?:[-_.]|$)|(?:^|[-_.])ae(?:[-_.]|$)/i.test(
+      file.name,
+    ) || file.name.toLowerCase() === 'diffusion_pytorch_model.safetensors'
+  )
+}
+
+function isSingleImageModelFile(file: File) {
+  return (
+    /stable.?diffusion|sdxl|sd.?3|juggernaut|dreamshaper/i.test(file.name) &&
+    !isImageVaeFile(file)
+  )
+}
+
+function getImageImportFileRole(file: File) {
+  if (isImageGenerationMainFile(file) || isSingleImageModelFile(file)) return '图片主模型'
+  if (isImageVaeFile(file)) return '图片处理文件'
+  if (/qwen|text.?encoder/i.test(file.name)) return '文字理解文件'
+  return '配套文件'
+}
+
+const imageImportAnalysis = computed(() => {
+  const files = selectedImageImportFiles.value
+  const main = files.find(isImageGenerationMainFile)
+  const vae = files.find(isImageVaeFile)
+  const encoders = files.filter(
+    (file) => file.name.toLowerCase().endsWith('.gguf') && /qwen|text.?encoder/i.test(file.name),
+  )
+  const wantsEightB = Boolean(main && /9b/i.test(main.name))
+  const encoder =
+    encoders.find((file) => wantsEightB ? /8b/i.test(file.name) : /4b/i.test(file.name)) ||
+    encoders[0]
+  const single = files.find(isSingleImageModelFile)
+  const missing: string[] = []
+
+  if (main) {
+    if (!encoder) missing.push(wantsEightB ? 'Qwen3-8B 文字理解文件' : 'Qwen3-4B 文字理解文件')
+    if (!vae) missing.push('FLUX.2 图片处理文件')
+  } else if (!single) {
+    missing.push('图片主模型文件')
+  }
+
+  return {
+    main,
+    encoder,
+    vae,
+    single,
+    missing,
+    configured: Boolean(single || (main && encoder && vae)),
+  }
+})
+
 const importMetadata = computed(() => {
-  const fileName = selectedImportFile.value?.name ?? 'Qwen3-8B-Q4_K_M.gguf'
-  const totalSize =
-    (selectedImportFile.value?.size ?? 0) +
-    (selectedProjectorFile.value?.size ?? 0)
+  const files: File[] =
+    importMode.value === 'image'
+      ? selectedImageImportFiles.value
+      : ([selectedImportFile.value, selectedProjectorFile.value].filter(
+          Boolean,
+        ) as File[])
+  const fileName =
+    importMode.value === 'image'
+      ? imageImportAnalysis.value.main?.name ||
+        imageImportAnalysis.value.single?.name ||
+        files[0]?.name ||
+        '图片模型'
+      : selectedImportFile.value?.name ?? 'Qwen3-8B-Q4_K_M.gguf'
+  const totalSize = files.reduce((total, file) => total + file.size, 0)
   return {
     fileName,
     projectorFileName: selectedProjectorFile.value?.name ?? '',
-    isVisionImport: Boolean(selectedProjectorFile.value),
+    isVisionImport:
+      importMode.value === 'chat' && Boolean(selectedProjectorFile.value),
+    isImageImport: importMode.value === 'image',
+    fileCount: files.length,
     size: totalSize
       ? `${(totalSize / 1024 / 1024 / 1024).toFixed(2)} GB`
       : '5.03 GB',
@@ -799,7 +911,21 @@ const importDetection = computed(() => {
     return {
       tone: 'idle',
       title: '选择下载好的模型文件',
-      detail: '普通模型选择 1 个文件；如果下载页提供了 2 个配套文件，请一次全部选择。',
+      detail: '直接选择下载页中的全部模型文件，系统会自动判断用途并组合，不需要先选择功能。',
+    }
+  }
+  if (importMode.value === 'image') {
+    if (!imageImportAnalysis.value.configured) {
+      return {
+        tone: 'warning',
+        title: '已识别为图片创作模型，但文件还不完整',
+        detail: `还需要：${imageImportAnalysis.value.missing.join('、')}。请从同一个下载页面一次选全。`,
+      }
+    }
+    return {
+      tone: 'success',
+      title: '已识别为图片生成与修改模型',
+      detail: `共 ${selectedImageImportFiles.value.length} 个文件，将自动组合使用；与聊天模型重复的文件会直接复用，不会重复占用空间。`,
     }
   }
   if (!selectedImportFile.value && selectedProjectorFile.value) {
@@ -824,6 +950,7 @@ const importDetection = computed(() => {
 })
 
 const importCapabilityLabel = computed(() => {
+  if (importMode.value === 'image') return '可以生成图片和修改图片'
   const capabilities = importDetectedCapabilities.value
   if (capabilities.includes('vision')) return '可以聊天和识别图片'
   if (capabilities.includes('embedding')) return '适合查找本地资料'
@@ -1246,6 +1373,10 @@ function nowTime() {
   }).format(new Date())
 }
 
+function toggleConversationSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+}
+
 function switchView(view: ViewKey) {
   activeView.value = view
   sidebarOpen.value = false
@@ -1652,6 +1783,37 @@ async function refreshBrowserFiles() {
   window.location.replace(url.toString())
 }
 
+async function clearModelCacheFiles() {
+  if (!systemInfo.value.canManage || modelCacheCleaning.value) return
+  try {
+    await ElMessageBox.confirm(
+      '将清理未完成的上传文件和已经没有模型使用的数据。已安装模型和图片模型不会被删除。',
+      '清理模型临时文件',
+      {
+        type: 'warning',
+        confirmButtonText: '开始清理',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+
+  modelCacheCleaning.value = true
+  try {
+    const result = await cleanupModelCache()
+    ElMessage.success(
+      result.removedFiles
+        ? `已清理 ${result.removedFiles} 个文件，共 ${formatFileSize(result.removedBytes)}`
+        : '没有发现需要清理的模型临时文件',
+    )
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    modelCacheCleaning.value = false
+  }
+}
+
 function readFileAsDataUrl(file: Blob) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
@@ -1864,70 +2026,11 @@ function openImageModelPicker() {
     ElMessage.warning('请在运行 ShotAI 的主机上添加图片模型')
     return
   }
-  imageModelInputRef.value?.click()
+  openImportDialog()
 }
 
 function waitForImageRuntime(delay: number) {
   return new Promise((resolve) => window.setTimeout(resolve, delay))
-}
-
-async function handleImageModelInput(event: Event) {
-  const input = event.target as HTMLInputElement
-  const files = [...(input.files ?? [])]
-  if (!files.length || imageModelImporting.value) return
-  const invalidFile = files.find(
-    (file) => !/\.(?:gguf|safetensors|sft|ckpt)$/i.test(file.name),
-  )
-  if (invalidFile) {
-    ElMessage.error(`${invalidFile.name} 不是可用的图片模型文件`)
-    input.value = ''
-    return
-  }
-
-  imageModelImporting.value = true
-  imageModelImportProgress.value = 1
-  try {
-    for (let index = 0; index < files.length; index += 1) {
-      const file = files[index]
-      imageModelImportStatus.value = `正在保存 ${file.name}`
-      await uploadImageModelFile(file, (fileProgress) => {
-        imageModelImportProgress.value = Math.max(
-          1,
-          Math.round(((index + fileProgress / 100) / files.length) * 88),
-        )
-      })
-    }
-    imageModelImportProgress.value = 92
-    imageModelImportStatus.value = '文件已保存，正在重新载入图片模型'
-    const restartResult = await restartImageRuntime()
-    if (restartResult.restartRequired) {
-      imageModelImportProgress.value = 100
-      imageModelImportStatus.value = '文件已经保存，请重新启动 ShotAI'
-      ElMessage.warning(imageModelImportStatus.value)
-      await refreshImageRuntime()
-      return
-    }
-
-    for (let attempt = 0; attempt < 24; attempt += 1) {
-      await waitForImageRuntime(1_000)
-      imageRuntime.value = await getImageRuntimeStatus()
-      imageModelImportProgress.value = Math.min(99, 93 + attempt)
-      if (imageRuntime.value.serviceOnline) break
-    }
-    if (!imageRuntime.value.serviceOnline) {
-      throw new Error('文件已经保存，但图片模型没有成功载入，请重新启动 ShotAI')
-    }
-    imageModelId.value = AUTO_IMAGE_PROVIDER_ID
-    imageModelImportProgress.value = 100
-    imageModelImportStatus.value = `${imageRuntime.value.modelLabel} 已经可以使用`
-    ElMessage.success('图片模型已经可以使用')
-  } catch (error) {
-    imageModelImportStatus.value = getErrorMessage(error)
-    ElMessage.error(imageModelImportStatus.value)
-  } finally {
-    imageModelImporting.value = false
-    input.value = ''
-  }
 }
 
 async function removeImageModelFile(fileName: string) {
@@ -1978,6 +2081,13 @@ function openImageStudio() {
     imageModelId.value = AUTO_IMAGE_PROVIDER_ID
   }
   void refreshImageRuntime()
+}
+
+function openUnifiedModelManagement() {
+  imageStudioOpen.value = false
+  settingsDrawerOpen.value = false
+  modelDrawerOpen.value = true
+  void Promise.all([refreshOllama(), refreshImageRuntime()])
 }
 
 function getImageGenerationError(error: unknown) {
@@ -3225,6 +3335,33 @@ function handleFileChange(_uploadFile: UploadFile, uploadFiles: UploadFiles) {
   const rawFiles = uploadFiles
     .map((uploadFile) => uploadFile.raw)
     .filter(Boolean) as File[]
+  const imageFilesSelected = rawFiles.some(
+    (file) =>
+      isImageGenerationMainFile(file) ||
+      isImageVaeFile(file) ||
+      isSingleImageModelFile(file),
+  )
+
+  importFileShas.value = {}
+  importSha.value = ''
+  importProjectorSha.value = ''
+  importDetectedCapabilities.value = []
+
+  if (imageFilesSelected) {
+    importMode.value = 'image'
+    selectedImageImportFiles.value = rawFiles
+    selectedImportFile.value = null
+    selectedProjectorFile.value = null
+    const main = rawFiles.find(isImageGenerationMainFile) ||
+      rawFiles.find(isSingleImageModelFile) || rawFiles[0]
+    importName.value = main
+      ? main.name.replace(/\.(?:gguf|safetensors|sft|ckpt)$/i, '').replace(/[-_]+/g, ' ')
+      : ''
+    return
+  }
+
+  importMode.value = 'chat'
+  selectedImageImportFiles.value = []
   let projectorFiles = rawFiles.filter(isVisionProjectorFile)
   let modelFiles = rawFiles.filter((file) => !isVisionProjectorFile(file))
 
@@ -3244,24 +3381,20 @@ function handleFileChange(_uploadFile: UploadFile, uploadFiles: UploadFiles) {
   } else {
     importName.value = ''
   }
-  importSha.value = ''
-  importProjectorSha.value = ''
-  importDetectedCapabilities.value = []
 }
 
 function openImportDialog() {
-  if (!ollamaConnected.value) {
-    ElMessage.error('AI 服务尚未启动，请启动后重新检查')
-    diagnosticsDrawerOpen.value = true
-    return
-  }
   modelDrawerOpen.value = false
+  imageStudioOpen.value = false
   importStep.value = 0
   importProgress.value = 0
   importStatus.value = ''
   selectedFiles.value = []
   selectedImportFile.value = null
   selectedProjectorFile.value = null
+  selectedImageImportFiles.value = []
+  importFileShas.value = {}
+  importMode.value = 'chat'
   importName.value = ''
   importSha.value = ''
   importProjectorSha.value = ''
@@ -3270,12 +3403,50 @@ function openImportDialog() {
 }
 
 async function nextImportStep() {
-  if (importStep.value === 0 && !selectedImportFile.value) {
+  if (
+    importStep.value === 0 &&
+    !selectedImportFile.value &&
+    selectedImageImportFiles.value.length === 0
+  ) {
     ElMessage.warning('请选择主要模型文件')
     return
   }
   if (importStep.value === 1 && !importName.value.trim()) {
     ElMessage.warning('请填写模型显示名称')
+    return
+  }
+
+  if (importStep.value === 0 && importMode.value === 'image') {
+    if (!imageImportAnalysis.value.configured) {
+      ElMessage.warning(`文件还不完整：${imageImportAnalysis.value.missing.join('、')}`)
+      return
+    }
+    validationRunning.value = true
+    try {
+      const shas: Record<string, string> = {}
+      const files = selectedImageImportFiles.value
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index]
+        importStatus.value = `正在检查 ${file.name} · ${index + 1}/${files.length}`
+        if (file.name.toLowerCase().endsWith('.gguf')) {
+          // stable-diffusion.cpp image weights may be valid GGUF files with no
+          // general.* metadata. Ollama chat models still use the stricter
+          // validation below, while image-runtime files only need a valid
+          // GGUF header and tensor table.
+          await verifyGgufFile(file, { allowMissingMetadata: true })
+        }
+        shas[file.name] = await calculateFileSha256(file, (progress) => {
+          importStatus.value = `正在检查 ${file.name} · ${progress}%`
+        })
+      }
+      importFileShas.value = shas
+      importStep.value = 1
+    } catch (error) {
+      ElMessage.error(getErrorMessage(error))
+    } finally {
+      validationRunning.value = false
+      importStatus.value = ''
+    }
     return
   }
 
@@ -3312,7 +3483,108 @@ async function nextImportStep() {
   if (importStep.value < 2) importStep.value += 1
 }
 
+async function startImageModelImport() {
+  const files = selectedImageImportFiles.value
+  if (!files.length || !imageImportAnalysis.value.configured) {
+    ElMessage.error('图片模型文件还没有准备完整')
+    return
+  }
+  if (files.some((file) => !importFileShas.value[file.name])) {
+    ElMessage.error('模型文件尚未完成检查')
+    return
+  }
+
+  importRunning.value = true
+  imageModelImporting.value = true
+  importProgress.value = 3
+  imageModelImportProgress.value = 3
+  importStatus.value = '正在准备图片模型文件'
+  imageModelImportStatus.value = importStatus.value
+
+  try {
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index]
+      const sha256 = importFileShas.value[file.name]
+      let reused = false
+      if (file.name.toLowerCase().endsWith('.gguf')) {
+        reused = (await reuseOllamaModelFileForImages(file.name, sha256)).reused
+      }
+      if (!reused) {
+        await uploadImageModelFile(
+          file,
+          (fileProgress) => {
+            const progress = Math.round(
+              5 + ((index + fileProgress / 100) / files.length) * 70,
+            )
+            importProgress.value = progress
+            imageModelImportProgress.value = progress
+            importStatus.value = `正在保存 ${file.name} · ${fileProgress}%`
+            imageModelImportStatus.value = importStatus.value
+          },
+          sha256,
+        )
+      } else {
+        importStatus.value = `${file.name} 已存在，直接复用`
+        imageModelImportStatus.value = importStatus.value
+        importProgress.value = Math.round(5 + ((index + 1) / files.length) * 70)
+      }
+    }
+
+    importProgress.value = 78
+    imageModelImportProgress.value = 78
+    importStatus.value = '文件已经组合，正在载入图片模型'
+    imageModelImportStatus.value = importStatus.value
+    const restartResult = await restartImageRuntime()
+    if (restartResult.restartRequired) {
+      throw new Error('文件已经保存，请关闭 ShotAI 后重新打开以载入图片模型')
+    }
+
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await waitForImageRuntime(1_000)
+      imageRuntime.value = await getImageRuntimeStatus()
+      const progress = Math.min(99, 80 + Math.floor(attempt / 6))
+      importProgress.value = progress
+      imageModelImportProgress.value = progress
+      if (imageRuntime.value.serviceOnline) break
+      if (attempt > 4 && imageRuntime.value.runtimeError) {
+        throw new Error(imageRuntime.value.runtimeError)
+      }
+    }
+    if (!imageRuntime.value.modelConfigured) {
+      throw new Error(
+        `图片模型文件仍不完整：${imageRuntime.value.missingFiles?.join('、') || '请重新选择同一下载页中的全部文件'}`,
+      )
+    }
+    if (!imageRuntime.value.serviceOnline) {
+      throw new Error(
+        imageRuntime.value.runtimeError ||
+          '图片模型载入超时，请在设置中查看图片运行日志',
+      )
+    }
+
+    imageModelId.value = AUTO_IMAGE_PROVIDER_ID
+    importName.value = imageRuntime.value.modelLabel
+    importDetectedCapabilities.value = ['image-generation', 'image-editing']
+    importProgress.value = 100
+    imageModelImportProgress.value = 100
+    importStatus.value = '图片生成和修改已经可以使用'
+    imageModelImportStatus.value = importStatus.value
+    importStep.value = 3
+  } catch (error) {
+    importStatus.value = '导入失败'
+    imageModelImportStatus.value = getErrorMessage(error)
+    ElMessage.error(imageModelImportStatus.value)
+  } finally {
+    importRunning.value = false
+    imageModelImporting.value = false
+  }
+}
+
 async function startImport() {
+  if (importMode.value === 'image') {
+    await startImageModelImport()
+    return
+  }
   const file = selectedImportFile.value
   if (!file || !importSha.value) {
     ElMessage.error('模型文件尚未完成校验')
@@ -3400,13 +3672,59 @@ async function startImport() {
 
 function finishImport() {
   importDialogOpen.value = false
-  ElMessage.success('模型已导入并设为当前模型')
+  ElMessage.success(
+    importMode.value === 'image'
+      ? '图片模型已经可以使用'
+      : '模型已导入并设为当前模型',
+  )
 }
 
-function setModel(model: LocalModel) {
+function isManagedModelSelected(
+  model: LocalModel,
+  section: ManagedModelSectionKey,
+) {
+  if (section === 'knowledge') return embeddingModelId.value === model.id
+  if (section === 'image') {
+    return selectedImageProvider.value?.id === `ollama:${model.id}`
+  }
+  return currentModelId.value === model.id
+}
+
+function managedModelActionLabel(
+  model: LocalModel,
+  section: ManagedModelSectionKey,
+) {
+  if (isManagedModelSelected(model, section)) return '使用中'
+  if (section === 'knowledge') return '用于资料'
+  if (section === 'image') return '用于创作'
+  return '用于对话'
+}
+
+function useManagedModel(
+  model: LocalModel,
+  section: ManagedModelSectionKey,
+) {
+  if (section === 'knowledge') {
+    embeddingModelId.value = model.id
+    ElMessage.success(`资料查找将使用 ${model.name}`)
+    return
+  }
+  if (section === 'image') {
+    imageModelId.value = `ollama:${model.id}`
+    ElMessage.success(`图片创作将使用 ${model.name}`)
+    return
+  }
   currentModelId.value = model.id
-  modelDrawerOpen.value = false
-  ElMessage.success(`已切换到 ${model.name}`)
+  ElMessage.success(`当前对话将使用 ${model.name}`)
+}
+
+function useLocalImageRuntime() {
+  if (!imageRuntime.value.serviceOnline) {
+    ElMessage.warning('图片模型还没有成功载入，请先检查文件和运行状态')
+    return
+  }
+  imageModelId.value = 'local-runtime'
+  ElMessage.success(`图片创作将使用 ${imageRuntime.value.modelLabel}`)
 }
 
 async function removeModel(model: LocalModel) {
@@ -3478,6 +3796,14 @@ function applyDocumentTheme(enabled: boolean) {
 
 watch(darkMode, applyDocumentTheme, { immediate: true })
 
+watch(sidebarCollapsed, (collapsed) => {
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0')
+  } catch {
+    // Browsers with restricted storage can still use the control for this session.
+  }
+})
+
 watch(
   [conversations, activeConversation, darkMode, showReasoning],
   scheduleWorkspaceSave,
@@ -3492,6 +3818,12 @@ watch(
 
 onMounted(async () => {
   window.addEventListener('keydown', handleGlobalKeydown)
+  try {
+    sidebarCollapsed.value =
+      window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
+  } catch {
+    sidebarCollapsed.value = false
+  }
   await Promise.all([
     restoreWorkspace(),
     restoreKnowledge(),
@@ -3530,26 +3862,58 @@ onBeforeUnmount(() => {
   <el-config-provider namespace="el">
     <div
       class="shot-app"
-      :class="{ dark: darkMode, 'theme-light': !darkMode }"
+      :class="{
+        dark: darkMode,
+        'theme-light': !darkMode,
+        'sidebar-collapsed': sidebarCollapsed,
+      }"
     >
       <a class="skip-link" href="#main-content">跳转到主要内容</a>
 
-      <aside class="app-sidebar" :class="{ 'is-open': sidebarOpen }">
+      <aside
+        id="conversation-sidebar"
+        class="app-sidebar"
+        :class="{
+          'is-open': sidebarOpen,
+          'is-collapsed': sidebarCollapsed,
+        }"
+        aria-label="对话导航"
+      >
         <div class="brand-block">
           <div class="brand-mark" aria-hidden="true">
             <img :src="appLogoUrl" alt="" />
           </div>
-          <div>
+          <div class="brand-copy">
             <div class="brand-name">SHOT<span>AI</span></div>
             <div class="brand-subtitle">完全离线的智能助手</div>
           </div>
         </div>
-        <el-button class="new-chat-button" type="primary" @click="createConversation">
+        <button
+          class="sidebar-collapse-toggle"
+          type="button"
+          :aria-label="sidebarCollapsed ? '展开对话侧边栏' : '折叠对话侧边栏'"
+          :aria-expanded="!sidebarCollapsed"
+          aria-controls="conversation-sidebar"
+          :title="sidebarCollapsed ? '展开对话侧边栏' : '折叠对话侧边栏'"
+          @click="toggleConversationSidebar"
+        >
+          <el-icon><Expand v-if="sidebarCollapsed" /><Fold v-else /></el-icon>
+        </button>
+        <el-button
+          class="new-chat-button"
+          type="primary"
+          aria-label="新建对话"
+          :title="sidebarCollapsed ? '新建对话' : undefined"
+          @click="createConversation"
+        >
           <el-icon><Plus /></el-icon>
-          新建对话
+          <span class="sidebar-button-label">新建对话</span>
         </el-button>
 
-        <div class="conversation-section">
+        <div
+          v-show="!sidebarCollapsed || sidebarOpen"
+          class="conversation-section"
+        >
           <div class="section-label"><span>对话记录</span></div>
           <el-input
             v-model="conversationSearch"
@@ -3577,11 +3941,30 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="sidebar-footer">
-          <button class="settings-entry" type="button" @click="switchView('settings')">
-            <el-icon><Setting /></el-icon>
-            <span>设置</span>
+          <button
+            class="settings-entry"
+            type="button"
+            aria-label="打开模型管理"
+            :title="sidebarCollapsed ? '模型管理' : undefined"
+            @click="switchView('models')"
+          >
+            <el-icon><Cpu /></el-icon>
+            <span class="sidebar-button-label">模型管理</span>
           </button>
-          <div class="offline-seal">
+          <button
+            class="settings-entry"
+            type="button"
+            aria-label="侧边栏设置"
+            :title="sidebarCollapsed ? '设置' : undefined"
+            @click="switchView('settings')"
+          >
+            <el-icon><Setting /></el-icon>
+            <span class="sidebar-button-label">设置</span>
+          </button>
+          <div
+            class="offline-seal"
+            :title="`${ollamaStateLabel} · 版本 ${ollamaVersion}`"
+          >
             <span
               class="status-dot"
               :class="{
@@ -3592,7 +3975,7 @@ onBeforeUnmount(() => {
               }"
               aria-hidden="true"
             ></span>
-            <div>
+            <div class="sidebar-status-copy">
               <strong>{{ ollamaStateLabel }}</strong>
               <span>版本 {{ ollamaVersion }}</span>
             </div>
@@ -4026,7 +4409,7 @@ onBeforeUnmount(() => {
               :accept="
                 composerMode === 'image'
                   ? 'image/jpeg,image/png,image/webp'
-                  : 'image/jpeg,image/png,image/webp,.txt,.md,.markdown,.pdf,.doc,.docx'
+                  : 'image/jpeg,image/png,image/webp,.txt,.md,.markdown,.pdf,.doc,.docx,.xls,.xlsx,.xlsm,.csv'
               "
               :multiple="composerMode !== 'image'"
               tabindex="-1"
@@ -4041,7 +4424,7 @@ onBeforeUnmount(() => {
                 {{
                   composerMode === 'image'
                     ? '支持 JPG、PNG 和 WebP，一次使用一张'
-                    : '支持常见图片、文本、PDF 和 Word 文件'
+                    : '支持常见图片、文本、PDF、Word 和 Excel 文件'
                 }}
               </span>
             </div>
@@ -4391,15 +4774,6 @@ onBeforeUnmount(() => {
         </template>
 
         <div class="drawer-content image-studio-content">
-          <input
-            ref="imageModelInputRef"
-            class="visually-hidden-input"
-            type="file"
-            accept=".gguf,.safetensors,.sft,.ckpt"
-            multiple
-            tabindex="-1"
-            @change="handleImageModelInput"
-          />
           <section
             v-if="!imageProviderOptions.length"
             class="image-model-install"
@@ -4408,10 +4782,9 @@ onBeforeUnmount(() => {
               <el-icon><Picture /></el-icon>
             </div>
             <span>Windows 本地图片创作</span>
-            <h3>再完成两项准备即可使用</h3>
+            <h3>添加完整模型后即可使用</h3>
             <p>
-              图片功能与聊天模型分开运行，不需要安装 Python 或
-              ComfyUI。准备完成后，内网里的其他电脑也能直接使用。
+              直接点击“添加模型”并选择下载页中的全部文件。系统会自动识别、组合并复用已有文件。
             </p>
 
             <div class="image-setup-checks">
@@ -4442,7 +4815,9 @@ onBeforeUnmount(() => {
                     {{
                       imageRuntime.modelConfigured
                         ? `已经找到 ${imageRuntime.modelFiles.length} 个文件`
-                        : '放入 models\\image 文件夹'
+                        : imageRuntime.missingFiles?.length
+                          ? `还缺少：${imageRuntime.missingFiles.join('、')}`
+                          : '尚未添加完整模型'
                     }}
                   </small>
                 </span>
@@ -4457,7 +4832,7 @@ onBeforeUnmount(() => {
                 @click="openImageModelPicker"
               >
                 <el-icon><FolderOpened /></el-icon>
-                选择下载好的模型文件
+                添加模型
               </el-button>
               <el-button
                 :loading="imageRuntimeChecking"
@@ -4492,11 +4867,17 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="image-platform-note">
-              <strong>需要选择几个文件</strong>
+              <strong>系统会自动判断</strong>
               <span>
-                单文件版选择 1 个文件；Z-Image Turbo
-                请一次选中下载页中的 3 个文件，ShotAI 会自动保存和组合使用。
+                聊天、看图、资料查找和图片创作共用同一个添加入口。FLUX.2 通常需要同一下载页中的 3 个文件。
               </span>
+            </div>
+            <div
+              v-if="imageRuntime.runtimeError"
+              class="vision-model-warning"
+              role="alert"
+            >
+              {{ imageRuntime.runtimeError }}
             </div>
           </section>
 
@@ -4579,37 +4960,15 @@ onBeforeUnmount(() => {
                   </el-select>
                   <small>只有需要固定使用某个图片模型时才需要更改。</small>
 
-                  <template v-if="systemInfo.canManage">
-                    <div class="image-model-file-heading">
-                      <span>主机上的图片模型文件</span>
-                      <el-button
-                        text
-                        size="small"
-                        :loading="imageModelImporting"
-                        @click="openImageModelPicker"
-                      >
-                        添加文件
-                      </el-button>
-                    </div>
-                    <div class="image-model-file-list">
-                      <div
-                        v-for="fileName in imageRuntime.modelFiles"
-                        :key="fileName"
-                      >
-                        <span>{{ fileName }}</span>
-                        <el-button
-                          text
-                          type="danger"
-                          size="small"
-                          :disabled="imageGenerating || imageModelImporting"
-                          :aria-label="`删除 ${fileName}`"
-                          @click="removeImageModelFile(fileName)"
-                        >
-                          <el-icon><Delete /></el-icon>
-                        </el-button>
-                      </div>
-                    </div>
-                  </template>
+                  <div class="image-model-management-shortcut">
+                    <span>
+                      <strong>模型文件统一管理</strong>
+                      <small>添加、删除和检查图片模型请前往模型管理</small>
+                    </span>
+                    <el-button @click="openUnifiedModelManagement">
+                      打开模型管理
+                    </el-button>
+                  </div>
                 </div>
               </details>
 
@@ -4705,9 +5064,9 @@ onBeforeUnmount(() => {
 
       <el-drawer
         v-model="modelDrawerOpen"
-        class="product-drawer"
+        class="product-drawer unified-model-drawer"
         title="模型管理"
-        size="min(680px, 94vw)"
+        size="min(820px, 94vw)"
         append-to-body
       >
         <template #header>
@@ -4727,7 +5086,6 @@ onBeforeUnmount(() => {
               <el-button
                 v-if="systemInfo.canManage"
                 type="primary"
-                :disabled="!ollamaConnected"
                 @click="openImportDialog"
               >
                 <el-icon><DocumentAdd /></el-icon>
@@ -4741,8 +5099,10 @@ onBeforeUnmount(() => {
           <div class="storage-summary">
             <div class="storage-icon"><el-icon><Files /></el-icon></div>
             <div class="storage-copy">
-              <strong>已安装的模型</strong>
-              <span>{{ models.length }} 个模型 · 共 {{ totalModelSize }}</span>
+              <strong>统一模型中心</strong>
+              <span>
+                {{ managedModelCount }} 组可用模型 · 对话模型占用 {{ totalModelSize }}
+              </span>
             </div>
             <el-progress
               :percentage="ollamaConnected ? 100 : 0"
@@ -4752,134 +5112,268 @@ onBeforeUnmount(() => {
             <span class="storage-free">版本 {{ ollamaVersion }}</span>
           </div>
 
-          <div class="model-list">
-            <div v-if="models.length === 0" class="model-empty">
-              <strong>{{ ollamaConnected ? '还没有安装模型' : 'AI 服务尚未启动' }}</strong>
+          <section
+            v-for="section in managedModelSections"
+            :key="section.key"
+            class="managed-model-section"
+            :aria-labelledby="`managed-model-${section.key}`"
+          >
+            <div class="managed-model-heading">
+              <div>
+                <h3 :id="`managed-model-${section.key}`">{{ section.title }}</h3>
+                <p>{{ section.description }}</p>
+              </div>
               <span>
                 {{
-                  ollamaConnected
-                    ? '点击“添加模型”，选择下载好的模型文件'
-                    : ollamaError
+                  section.models.length +
+                  (section.key === 'image' && imageRuntime.modelFiles.length ? 1 : 0)
                 }}
+                组
               </span>
             </div>
-            <article
-              v-for="model in models"
-              :key="model.id"
-              class="model-row"
-              :class="{ 'is-current': model.id === currentModelId }"
-            >
-              <div class="model-symbol">{{ model.family.slice(0, 1) }}</div>
-              <div class="model-details">
-                <div class="model-title-line">
-                  <h3>{{ model.name }}</h3>
-                  <el-tag
-                    v-if="model.id === currentModelId"
-                    type="success"
-                    effect="plain"
-                    size="small"
-                  >
-                    当前
-                  </el-tag>
-                </div>
-                <div class="model-specs">
-                  <span>{{ model.size }}</span>
-                  <span
-                    v-if="model.capabilities.includes('vision')"
-                    class="model-capability"
-                  >
-                    支持图片
-                  </span>
-                  <span
-                    v-else-if="model.capabilities.includes('embedding')"
-                    class="model-capability"
-                  >
-                    适合资料查找
-                  </span>
-                  <span
-                    v-if="isImageGenerationModel(model)"
-                    class="model-capability"
-                  >
-                    可以创作图片
-                  </span>
-                  <span
-                    v-if="model.capabilities.includes('thinking')"
-                    class="model-capability"
-                  >
-                    可显示回答思路
-                  </span>
-                  <span v-if="!model.detailsAvailable" class="model-capability muted">
-                    信息待确认
-                  </span>
-                </div>
-              </div>
-              <div class="model-actions">
-                <span class="runtime-state">
-                  <span
-                    class="status-dot"
-                    :class="{ muted: model.status !== 'ready' }"
-                  ></span>
-                  {{ model.status === 'ready' ? '正在使用' : '可以使用' }}
-                </span>
-                <el-button
-                  v-if="model.id !== currentModelId"
-                  @click="setModel(model)"
-                >
-                  使用
-                </el-button>
-                <el-button v-else disabled>
-                  <el-icon><Check /></el-icon>
-                  使用中
-                </el-button>
-                <el-button
-                  v-if="systemInfo.canManage"
-                  class="model-delete-button"
-                  text
-                  type="danger"
-                  :disabled="isGenerating"
-                  :aria-label="`删除 ${model.name}`"
-                  @click="removeModel(model)"
-                >
-                  <el-icon><Delete /></el-icon>
-                </el-button>
-              </div>
-            </article>
-          </div>
 
-          <section class="vision-model-guide">
-            <div class="vision-guide-heading">
-              <div>
-                <span>适合当前电脑</span>
-                <h3>安装可以识别图片的模型</h3>
-              </div>
-              <el-tag type="success" effect="plain">文字和图片</el-tag>
-            </div>
-            <p>
-              点击下方内容即可复制，然后粘贴到运行服务的电脑中进行安装。
-              安装完成后点击“刷新”。
-            </p>
-            <article
-              v-for="recommendation in visionModelRecommendations"
-              :key="recommendation.command"
-              class="vision-recommendation"
-            >
-              <div>
-                <span>
-                  {{ recommendation.label }} · {{ recommendation.size }}
-                </span>
-                <strong>{{ recommendation.name }}</strong>
-                <small>{{ recommendation.note }}</small>
-              </div>
-              <button
-                type="button"
-                :aria-label="`复制 ${recommendation.name} 的安装内容`"
-                @click="copyInstallCommand(recommendation.command)"
+            <div class="model-list managed-model-list">
+              <article
+                v-if="section.key === 'image' && imageRuntime.modelFiles.length"
+                class="model-row local-image-model-row"
+                :class="{
+                  'is-current': selectedImageProvider?.id === 'local-runtime',
+                }"
               >
-                <span>复制安装内容</span>
-                <el-icon><CopyDocument /></el-icon>
-              </button>
-            </article>
+                <div class="model-symbol">图</div>
+                <div class="model-details">
+                  <div class="model-title-line">
+                    <h3>{{ imageRuntime.modelLabel }}</h3>
+                    <el-tag
+                      :type="imageRuntime.serviceOnline ? 'success' : 'warning'"
+                      effect="plain"
+                      size="small"
+                    >
+                      {{ imageRuntime.serviceOnline ? '已载入' : '待检查' }}
+                    </el-tag>
+                  </div>
+                  <div class="model-specs">
+                    <span>{{ imageRuntime.modelFiles.length }} 个组合文件</span>
+                    <span class="model-capability">生成图片</span>
+                    <span class="model-capability">修改图片</span>
+                  </div>
+                </div>
+                <div class="model-actions">
+                  <span class="runtime-state">
+                    <span
+                      class="status-dot"
+                      :class="{ muted: !imageRuntime.serviceOnline }"
+                    ></span>
+                    {{ imageRuntime.serviceOnline ? '运行正常' : '尚未载入' }}
+                  </span>
+                  <el-button
+                    :disabled="
+                      selectedImageProvider?.id === 'local-runtime' ||
+                      !imageRuntime.serviceOnline
+                    "
+                    @click="useLocalImageRuntime"
+                  >
+                    {{
+                      selectedImageProvider?.id === 'local-runtime'
+                        ? '使用中'
+                        : '用于创作'
+                    }}
+                  </el-button>
+                </div>
+              </article>
+
+              <details
+                v-if="section.key === 'image' && imageRuntime.modelFiles.length"
+                class="managed-model-files"
+              >
+                <summary>
+                  查看 {{ imageRuntime.modelFiles.length }} 个图片模型文件
+                </summary>
+                <div>
+                  <div
+                    v-for="fileName in imageRuntime.modelFiles"
+                    :key="fileName"
+                  >
+                    <span>{{ fileName }}</span>
+                    <el-button
+                      v-if="systemInfo.canManage"
+                      text
+                      type="danger"
+                      size="small"
+                      :disabled="imageGenerating || imageModelImporting"
+                      :aria-label="`删除 ${fileName}`"
+                      @click="removeImageModelFile(fileName)"
+                    >
+                      <el-icon><Delete /></el-icon>
+                    </el-button>
+                  </div>
+                </div>
+              </details>
+
+              <article
+                v-for="model in section.models"
+                :key="`${section.key}:${model.id}`"
+                class="model-row"
+                :class="{
+                  'is-current': isManagedModelSelected(model, section.key),
+                }"
+              >
+                <div class="model-symbol">{{ model.family.slice(0, 1) }}</div>
+                <div class="model-details">
+                  <div class="model-title-line">
+                    <h3>{{ model.name }}</h3>
+                    <el-tag
+                      v-if="isManagedModelSelected(model, section.key)"
+                      type="success"
+                      effect="plain"
+                      size="small"
+                    >
+                      当前
+                    </el-tag>
+                  </div>
+                  <div class="model-specs">
+                    <span>{{ model.size }}</span>
+                    <span
+                      v-if="model.capabilities.includes('vision')"
+                      class="model-capability"
+                    >
+                      支持图片
+                    </span>
+                    <span
+                      v-if="model.capabilities.includes('embedding')"
+                      class="model-capability"
+                    >
+                      资料查找
+                    </span>
+                    <span
+                      v-if="isImageGenerationModel(model)"
+                      class="model-capability"
+                    >
+                      图片创作
+                    </span>
+                    <span
+                      v-if="model.capabilities.includes('thinking')"
+                      class="model-capability"
+                    >
+                      回答思路
+                    </span>
+                    <span
+                      v-if="!model.detailsAvailable"
+                      class="model-capability muted"
+                    >
+                      信息待确认
+                    </span>
+                  </div>
+                </div>
+                <div class="model-actions">
+                  <span class="runtime-state">
+                    <span
+                      class="status-dot"
+                      :class="{ muted: model.status !== 'ready' }"
+                    ></span>
+                    {{ model.status === 'ready' ? '已载入' : '可以使用' }}
+                  </span>
+                  <el-button
+                    :disabled="isManagedModelSelected(model, section.key)"
+                    @click="useManagedModel(model, section.key)"
+                  >
+                    <el-icon
+                      v-if="isManagedModelSelected(model, section.key)"
+                    >
+                      <Check />
+                    </el-icon>
+                    {{ managedModelActionLabel(model, section.key) }}
+                  </el-button>
+                  <el-button
+                    v-if="systemInfo.canManage"
+                    class="model-delete-button"
+                    text
+                    type="danger"
+                    :disabled="isGenerating"
+                    :aria-label="`删除 ${model.name}`"
+                    @click="removeModel(model)"
+                  >
+                    <el-icon><Delete /></el-icon>
+                  </el-button>
+                </div>
+              </article>
+
+              <div
+                v-if="
+                  section.models.length === 0 &&
+                  (section.key !== 'image' || !imageRuntime.modelFiles.length)
+                "
+                class="model-empty compact"
+              >
+                <strong>
+                  {{
+                    section.key === 'conversation'
+                      ? ollamaConnected
+                        ? '还没有对话模型'
+                        : 'AI 服务尚未启动'
+                      : section.key === 'knowledge'
+                        ? '尚未添加资料查找模型'
+                        : '尚未添加图片生成模型'
+                  }}
+                </strong>
+                <span>
+                  {{
+                    section.key === 'knowledge'
+                      ? '没有专用模型时仍可使用普通文字查找'
+                      : section.key === 'image'
+                        ? '添加完整图片模型后，可在对话中直接生成和修改图片'
+                        : ollamaError || '点击右上角“添加模型”开始使用'
+                  }}
+                </span>
+              </div>
+            </div>
+
+            <div
+              v-if="section.key === 'image' && imageRuntime.runtimeError"
+              class="vision-model-warning"
+              role="alert"
+            >
+              {{ imageRuntime.runtimeError }}
+            </div>
           </section>
+
+          <details class="vision-model-guide managed-model-guide">
+            <summary>模型推荐与安装帮助</summary>
+            <div class="managed-model-guide-content">
+              <div class="vision-guide-heading">
+                <div>
+                  <span>适合当前电脑</span>
+                  <h3>安装可以识别图片的模型</h3>
+                </div>
+                <el-tag type="success" effect="plain">文字和图片</el-tag>
+              </div>
+              <p>
+                点击下方内容即可复制，然后粘贴到运行服务的电脑中进行安装。
+                安装完成后点击“刷新”。
+              </p>
+              <article
+                v-for="recommendation in visionModelRecommendations"
+                :key="recommendation.command"
+                class="vision-recommendation"
+              >
+                <div>
+                  <span>
+                    {{ recommendation.label }} · {{ recommendation.size }}
+                  </span>
+                  <strong>{{ recommendation.name }}</strong>
+                  <small>{{ recommendation.note }}</small>
+                </div>
+                <button
+                  type="button"
+                  :aria-label="`复制 ${recommendation.name} 的安装内容`"
+                  @click="copyInstallCommand(recommendation.command)"
+                >
+                  <span>复制安装内容</span>
+                  <el-icon><CopyDocument /></el-icon>
+                </button>
+              </article>
+            </div>
+          </details>
 
           <button
             v-if="systemInfo.canManage"
@@ -4890,7 +5384,7 @@ onBeforeUnmount(() => {
             <span class="import-entry-icon"><el-icon><Plus /></el-icon></span>
             <span>
               <strong>从电脑添加模型</strong>
-              <small>普通模型选一个文件；图片模型可以同时选择两个文件</small>
+              <small>选择下载页中的文件，系统自动判断模型用途并组合</small>
             </span>
             <el-icon class="import-arrow"><ArrowRight /></el-icon>
           </button>
@@ -5089,7 +5583,7 @@ onBeforeUnmount(() => {
                 class="knowledge-uploader"
                 drag
                 action="#"
-                accept=".txt,.md,.markdown,.pdf,.doc,.docx"
+                accept=".txt,.md,.markdown,.pdf,.doc,.docx,.xls,.xlsx,.xlsm,.csv"
                 :auto-upload="false"
                 :show-file-list="false"
                 :disabled="knowledgeImporting"
@@ -5101,7 +5595,7 @@ onBeforeUnmount(() => {
                 </div>
                 <template #tip>
                   <div class="el-upload__tip">
-                    支持文本、PDF 和 Word 文件；每个文件最大 20 MB
+                    支持文本、PDF、Word 和 Excel 文件；每个文件最大 20 MB
                   </div>
                 </template>
               </el-upload>
@@ -5523,6 +6017,15 @@ onBeforeUnmount(() => {
                 <span><strong>刷新网页文件</strong><small>页面异常或更新后仍显示旧内容时使用</small></span>
                 <el-button @click="refreshBrowserFiles">立即刷新</el-button>
               </div>
+              <div v-if="systemInfo.canManage">
+                <span><strong>模型临时文件</strong><small>清理中断上传和已不再使用的数据，不删除已安装模型</small></span>
+                <el-button
+                  :loading="modelCacheCleaning"
+                  @click="clearModelCacheFiles"
+                >
+                  清理
+                </el-button>
+              </div>
               <div>
                 <span><strong>全部对话</strong><small>{{ conversations.length }} 条本地记录</small></span>
                 <el-button type="danger" plain @click="clearSavedConversations">清空</el-button>
@@ -5584,9 +6087,9 @@ onBeforeUnmount(() => {
               class="model-uploader"
               drag
               action="#"
-              accept=".gguf"
+              accept=".gguf,.safetensors,.sft,.ckpt"
               :auto-upload="false"
-              :limit="2"
+              :limit="6"
               multiple
               :on-change="handleFileChange"
               :on-remove="handleFileChange"
@@ -5597,7 +6100,7 @@ onBeforeUnmount(() => {
               </div>
               <template #tip>
                 <div class="el-upload__tip">
-                  普通聊天模型选择 1 个文件；可以识别图片的模型请同时选择下载到的 2 个文件。
+                  不需要先选择功能。把同一下载页中的相关文件一次选中，系统会自动识别用途。
                 </div>
               </template>
             </el-upload>
@@ -5619,7 +6122,7 @@ onBeforeUnmount(() => {
 
           <section v-else-if="importStep === 1" class="validation-step">
             <div class="file-summary">
-              <div class="file-type">主要</div>
+              <div class="file-type">{{ importMetadata.isImageImport ? '图片' : '主要' }}</div>
               <div>
                 <strong>{{ importMetadata.fileName }}</strong>
                 <span>
@@ -5627,11 +6130,31 @@ onBeforeUnmount(() => {
                   {{
                     importMetadata.isVisionImport
                       ? '主要模型文件'
-                      : '聊天模型文件'
+                      : importMetadata.isImageImport
+                        ? `${importMetadata.fileCount} 个文件 · 自动组合`
+                        : '聊天模型文件'
                   }}
                 </span>
               </div>
               <el-tag type="success" effect="plain">文件正常</el-tag>
+            </div>
+
+            <div
+              v-if="importMetadata.isImageImport"
+              class="image-import-file-summary"
+            >
+              <div
+                v-for="file in selectedImageImportFiles"
+                :key="file.name"
+                class="file-summary projector-file-summary"
+              >
+                <div class="file-type">{{ getImageImportFileRole(file).slice(0, 2) }}</div>
+                <div>
+                  <strong>{{ file.name }}</strong>
+                  <span>{{ getImageImportFileRole(file) }} · {{ formatFileSize(file.size) }}</span>
+                </div>
+                <el-tag type="success" effect="plain">已经识别</el-tag>
+              </div>
             </div>
 
             <div
@@ -5648,12 +6171,20 @@ onBeforeUnmount(() => {
 
             <div class="validation-grid">
               <div>
-                <span>主要文件</span>
+                <span>{{ importMetadata.isImageImport ? '文件组合' : '主要文件' }}</span>
                 <strong>检查通过</strong>
               </div>
               <div>
-                <span>图片功能</span>
-                <strong>{{ importMetadata.isVisionImport ? '可以使用' : '没有添加' }}</strong>
+                <span>{{ importMetadata.isImageImport ? '自动用途' : '图片识别' }}</span>
+                <strong>
+                  {{
+                    importMetadata.isImageImport
+                      ? '生成与修改图片'
+                      : importMetadata.isVisionImport
+                        ? '可以使用'
+                        : '没有添加'
+                  }}
+                </strong>
               </div>
               <div>
                 <span>文件总大小</span>
@@ -5668,7 +6199,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <el-form label-position="top">
+            <el-form v-if="!importMetadata.isImageImport" label-position="top">
               <el-form-item label="显示名称">
                 <el-input v-model="importName" maxlength="60" />
               </el-form-item>
@@ -5692,7 +6223,11 @@ onBeforeUnmount(() => {
               <div class="ready-icon"><el-icon><Cpu /></el-icon></div>
               <h3>准备安装模型</h3>
               <p>
-                ShotAI 将安装所选文件，并检查模型是否可以正常回答。
+                {{
+                  importMetadata.isImageImport
+                    ? 'ShotAI 将自动组合这些文件并启动图片服务，同时检查生成与修改功能。'
+                    : 'ShotAI 将安装所选文件，并检查模型是否可以正常回答。'
+                }}
                 {{
                   importMetadata.isVisionImport
                     ? '同时检查图片识别功能。'
@@ -5702,7 +6237,7 @@ onBeforeUnmount(() => {
               <div class="import-plan">
                 <span><el-icon><Check /></el-icon> 不发送到网络</span>
                 <span><el-icon><Check /></el-icon> 只在这台电脑处理</span>
-                <span><el-icon><Check /></el-icon> 保留原始文件</span>
+                <span><el-icon><Check /></el-icon> 重复文件自动复用</span>
               </div>
             </div>
             <div v-else class="progress-state">
@@ -5722,7 +6257,9 @@ onBeforeUnmount(() => {
           <section v-else class="complete-step">
             <div class="complete-icon"><el-icon><CircleCheck /></el-icon></div>
             <h3>模型导入成功</h3>
-            <p>{{ importName }} 已检查完成，现在可以开始对话。</p>
+            <p>
+              {{ importName }} 已检查完成，现在可以{{ importMetadata.isImageImport ? '生成或修改图片' : '开始对话' }}。
+            </p>
             <div class="complete-model">
               <span>AI</span>
               <div>
@@ -5771,7 +6308,7 @@ onBeforeUnmount(() => {
               type="primary"
               @click="finishImport"
             >
-              使用此模型
+              {{ importMetadata.isImageImport ? '完成' : '使用此模型' }}
             </el-button>
           </div>
         </template>

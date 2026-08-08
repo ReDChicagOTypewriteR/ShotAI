@@ -49,6 +49,7 @@ for (const expected of [
   'pathToFileURL',
   'SHOTAI_EMBEDDED',
   'SHOTAI_SMOKE_TEST',
+  "args.push('--diffusion-model', diffusion, '--llm', textEncoder, '--vae', vae)",
 ]) {
   assert.ok(mainSource.includes(expected), `Electron 主进程缺少：${expected}`)
 }
@@ -78,6 +79,7 @@ console.log(
       powershellWebServer: false,
       ollamaRuntimeOptional: true,
       imageRuntimeOptional: true,
+      threeFileImagePipeline: true,
       modelsIncluded: false,
       firewallRuleInstalledOnce: true,
     },

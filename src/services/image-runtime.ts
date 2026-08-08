@@ -8,6 +8,9 @@ export interface ImageRuntimeStatus {
   modelFiles: string[]
   modelDirectory: string
   runtimeDirectory: string
+  modelKind?: 'single' | 'pipeline' | 'unknown'
+  missingFiles?: string[]
+  runtimeError?: string
 }
 
 interface ImageGenerationResponse {
@@ -96,6 +99,7 @@ function getUploadError(responseText: string, fallback: string) {
 export function uploadImageModelFile(
   file: File,
   onProgress?: (progress: number) => void,
+  sha256?: string,
 ) {
   return new Promise<{ fileName: string; size: number }>((resolve, reject) => {
     const request = new XMLHttpRequest()
@@ -105,6 +109,7 @@ export function uploadImageModelFile(
     )
     request.responseType = 'text'
     request.setRequestHeader('Content-Type', 'application/octet-stream')
+    if (sha256) request.setRequestHeader('X-ShotAI-SHA256', sha256)
     request.upload.addEventListener('progress', (event) => {
       if (event.lengthComputable) {
         onProgress?.(Math.round((event.loaded / event.total) * 100))
@@ -133,6 +138,27 @@ export function uploadImageModelFile(
     })
     request.send(file)
   })
+}
+
+export async function reuseOllamaModelFileForImages(
+  fileName: string,
+  sha256: string,
+) {
+  const response = await fetch('/image-runtime/models/reuse', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fileName, sha256 }),
+  })
+  const body = await response.text()
+  if (!response.ok) {
+    if (response.status === 404) return { reused: false }
+    throw new Error(getUploadError(body, '没有成功复用已有模型文件'))
+  }
+  return JSON.parse(body) as { reused: boolean; fileName: string }
 }
 
 export async function deleteImageModelFile(fileName: string) {

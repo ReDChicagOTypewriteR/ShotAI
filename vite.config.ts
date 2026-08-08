@@ -8,7 +8,12 @@ export default defineConfig({
     vue(),
     legacy({
       targets: ['chrome >= 64', 'edge >= 79', 'firefox >= 68'],
-      modernPolyfills: true,
+      // Some intranet browsers can execute ES modules but do not implement
+      // import.meta.resolve. The modern/legacy runtime probe deliberately
+      // throws in those browsers, which leaves ShotAI blank on a few managed
+      // Windows installations. Shipping the broadly-compatible bundle only
+      // avoids that probe and also keeps file:// fallback builds usable.
+      renderModernChunks: false,
     }),
   ],
   build: {

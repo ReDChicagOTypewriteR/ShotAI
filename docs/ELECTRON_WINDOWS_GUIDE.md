@@ -1,4 +1,4 @@
-# ShotAI 1.1 Electron Windows 客户端
+# ShotAI Electron Windows 客户端
 
 Electron 版本提供独立桌面窗口、任务栏图标和 9090 内网访问，不再运行
 `server.ps1`，因此不受 Windows PowerShell 中文编码影响。

@@ -1,7 +1,7 @@
 # ShotAI 内网部署与测试说明
 
-> 1.0 完整便携包使用 `start-windows.bat`；1.1 EXE 精简预览版直接双击
-> `ShotAI.exe`。两者均在 9090 提供同一套局域网工作台。
+> 当前 Windows 安装版直接运行 `ShotAI.exe`；旧版便携交付目录使用
+> `start-windows.bat`。两种方式均在 9090 提供同一套局域网工作台。
 
 ## 目录用途
 
@@ -14,7 +14,7 @@ Ollama 只运行在主机上，其他电脑通过 ShotAI 网页服务器的 `/ol
 
 ## 主机启动
 
-1. 1.0 正式包已经带有 Windows Ollama 免安装运行组件，无需单独安装。
+1. 当前完整安装包已经带有 Windows Ollama 免安装运行组件，无需单独安装。
 2. Windows 右键以管理员身份运行 `start-windows.bat`；Linux 执行
    `./start-linux.sh`。Windows 启动器会保留窗口并显示错误信息；请保持该
    窗口开启，按 `Ctrl+C` 可停止服务。
@@ -27,7 +27,7 @@ Ollama 只运行在主机上，其他电脑通过 ShotAI 网页服务器的 `/ol
 {
   "host": "0.0.0.0",
   "port": 9090,
-  "version": "1.0.0",
+  "version": "1.1.6",
   "allowLanAdministration": false,
   "ollamaUrl": "http://127.0.0.1:11434",
   "imageRuntime": {

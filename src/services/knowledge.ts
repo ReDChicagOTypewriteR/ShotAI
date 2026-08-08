@@ -47,7 +47,18 @@ export interface RetrievedKnowledge {
   mode: 'vector' | 'keyword'
 }
 
-const SUPPORTED_EXTENSIONS = ['txt', 'md', 'markdown', 'pdf', 'doc', 'docx']
+const SUPPORTED_EXTENSIONS = [
+  'txt',
+  'md',
+  'markdown',
+  'pdf',
+  'doc',
+  'docx',
+  'xls',
+  'xlsx',
+  'xlsm',
+  'csv',
+]
 const MAX_FILE_BYTES = 20 * 1024 * 1024
 const MAX_CHUNKS_PER_DOCUMENT = 2000
 
@@ -71,7 +82,7 @@ export function getFileExtension(fileName: string) {
 export function validateKnowledgeFile(file: File) {
   const extension = getFileExtension(file.name)
   if (!SUPPORTED_EXTENSIONS.includes(extension)) {
-    throw new Error('只支持常见文本、PDF 和 Word 文件')
+    throw new Error('只支持常见文本、PDF、Word 和 Excel 文件')
   }
   if (!file.size) throw new Error('这个文件是空的，无法添加')
   if (file.size > MAX_FILE_BYTES) {
@@ -115,6 +126,46 @@ async function extractDocxText(file: File) {
   return result.value
 }
 
+async function extractSpreadsheetText(file: File) {
+  // Spreadsheet parsing is loaded only when needed so normal chat stays fast
+  // on older intranet browsers.
+  const XLSX = await import('xlsx')
+  const workbook = XLSX.read(await file.arrayBuffer(), {
+    type: 'array',
+    cellDates: true,
+    cellFormula: true,
+  })
+  const sections: string[] = []
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName]
+    if (!sheet) continue
+    const rows = XLSX.utils.sheet_to_json<Array<string | number | boolean>>(
+      sheet,
+      {
+        header: 1,
+        raw: false,
+        defval: '',
+        blankrows: false,
+      },
+    )
+    const lines = rows
+      .map((row) => {
+        const cells = [...row]
+        while (cells.length && String(cells[cells.length - 1]).trim() === '') {
+          cells.pop()
+        }
+        return cells.map((cell) => String(cell).trim()).join('\t').trim()
+      })
+      .filter(Boolean)
+    if (lines.length) {
+      sections.push(`工作表：${sheetName}\n${lines.join('\n')}`)
+    }
+  }
+
+  return sections.join('\n\n')
+}
+
 export async function extractKnowledgeText(file: File) {
   validateKnowledgeFile(file)
   const extension = getFileExtension(file.name)
@@ -128,6 +179,8 @@ export async function extractKnowledgeText(file: File) {
     text = await extractPdfText(file)
   } else if (extension === 'docx') {
     text = await extractDocxText(file)
+  } else if (['xls', 'xlsx', 'xlsm', 'csv'].includes(extension)) {
+    text = await extractSpreadsheetText(file)
   } else {
     text = await file.text()
   }

@@ -1,4 +1,4 @@
-# ShotAI 1.1 EXE 对话免安装包 · CUDA 12
+# ShotAI Windows EXE 对话免安装包 · CUDA 12
 
 这个版本面向 NVIDIA 显卡 Windows x64 主机，已经包含 ShotAI 原生启动器和
 Ollama CUDA 12 免安装运行组件。它不包含任何聊天、图片识别或图片生成模型。

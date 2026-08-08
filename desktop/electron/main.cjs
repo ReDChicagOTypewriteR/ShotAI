@@ -37,6 +37,12 @@ let logPath = ''
 let config = null
 let serverReady = false
 const openLogFiles = []
+const imageRuntimeState = {
+  state: 'idle',
+  error: '',
+  modelKind: 'unknown',
+}
+globalThis.__shotaiImageRuntimeState = imageRuntimeState
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -191,24 +197,33 @@ function selectImageArguments() {
   let vae = configuredImagePath(settings.vae)
 
   if (!full && !diffusion) {
-    full = files.find(
+    const isComponent = (file) =>
+      /qwen|text.?encoder|clip|t5|vae|(?:^|[-_.])ae(?:[-_.]|$)/i.test(file.name)
+    diffusion = files.find(
       (file) =>
-        file.name.toLowerCase().endsWith('.gguf') &&
-        /flux.?2.*klein/i.test(file.name) &&
-        !/qwen|vae|ae\./i.test(file.name),
+        /flux.?2.*klein|z.?image.*turbo/i.test(file.name) &&
+        !isComponent(file),
     )?.path || ''
-    if (!full) {
-      diffusion = files.find(
-        (file) =>
-          /z.?image.*turbo|flux.?2.*klein/i.test(file.name) &&
-          !/qwen|vae|ae\./i.test(file.name),
+    if (diffusion) {
+      const wantsEightB = /9b/i.test(basename(diffusion))
+      const encoders = files.filter(
+        (file) => file.name.toLowerCase().endsWith('.gguf') && /qwen|text.?encoder/i.test(file.name),
+      )
+      textEncoder = (
+        encoders.find((file) => wantsEightB ? /8b/i.test(file.name) : /4b/i.test(file.name)) ||
+        encoders[0]
       )?.path || ''
-      textEncoder = files.find((file) => /qwen.*(?:3|4b)/i.test(file.name))?.path || ''
       vae = files.find(
         (file) =>
-          /flux2.*ae|vae|ae(?:\.|_).*(?:sft|safetensors)/i.test(file.name) ||
+          /flux.?2.*vae|(?:^|[-_.])vae(?:[-_.]|$)|(?:^|[-_.])ae(?:[-_.]|$)/i.test(file.name) ||
           (file.name === 'diffusion_pytorch_model.safetensors' &&
             file.size < 1_000_000_000),
+      )?.path || ''
+    } else {
+      full = files.find(
+        (file) =>
+          /stable.?diffusion|sdxl|sd.?3|juggernaut|dreamshaper/i.test(file.name) &&
+          !isComponent(file),
       )?.path || ''
     }
   }
@@ -216,10 +231,18 @@ function selectImageArguments() {
   const port = Number(new URL(settings.url || 'http://127.0.0.1:1234').port || 1234)
   const args = ['--listen-ip', '127.0.0.1', '--listen-port', String(port)]
   if (full && existsSync(full)) {
+    imageRuntimeState.modelKind = 'single'
     args.push('--model', full)
   } else if ([diffusion, textEncoder, vae].every((path) => path && existsSync(path))) {
+    imageRuntimeState.modelKind = 'pipeline'
     args.push('--diffusion-model', diffusion, '--llm', textEncoder, '--vae', vae)
   } else {
+    imageRuntimeState.modelKind = diffusion ? 'pipeline' : 'unknown'
+    imageRuntimeState.error = diffusion
+      ? '图片模型文件不完整：请同时添加主模型、文字理解文件和图片处理文件。'
+      : files.length
+        ? '没有识别到可用的图片主模型，请确认文件名和下载页面说明。'
+        : '尚未添加图片模型文件。'
     return null
   }
   args.push(
@@ -252,21 +275,42 @@ async function startImageRuntime() {
     process.platform === 'win32' ? 'sd-server.exe' : 'sd-server',
   )
   if (!settings || !existsSync(executable)) {
+    imageRuntimeState.state = 'unavailable'
+    if (settings && !existsSync(executable)) {
+      imageRuntimeState.error = '安装包中没有找到图片运行组件，请安装完整版本。'
+    }
     log('图片运行组件或图片模型未准备，跳过图片服务。')
     return
   }
   if (await endpointOnline(`http://127.0.0.1:${settings.port}/v1/models`)) {
+    imageRuntimeState.state = 'online'
+    imageRuntimeState.error = ''
     log('检测到已经运行的图片服务。')
     return
   }
   const output = openProcessLog('image-runtime.log')
-  imageProcess = spawn(executable, settings.args, {
+  imageRuntimeState.state = 'starting'
+  imageRuntimeState.error = ''
+  const child = spawn(executable, settings.args, {
     cwd: runtimeDirectory,
     windowsHide: true,
     stdio: ['ignore', output, output],
   })
-  imageProcess.on('error', (error) => log(`图片服务启动失败：${error.message}`))
-  imageProcess.on('exit', (code) => log(`图片服务已停止，代码：${code}`))
+  imageProcess = child
+  child.on('error', (error) => {
+    if (imageProcess !== child) return
+    imageRuntimeState.state = 'error'
+    imageRuntimeState.error = `图片服务启动失败：${error.message}`
+    log(imageRuntimeState.error)
+  })
+  child.on('exit', (code) => {
+    if (imageProcess !== child) return
+    imageRuntimeState.state = code === 0 ? 'stopped' : 'error'
+    if (code !== 0) {
+      imageRuntimeState.error = `图片服务启动后停止，代码 ${code}。请查看 logs\\image-runtime.log。`
+    }
+    log(`图片服务已停止，代码：${code}`)
+  })
   log(`图片服务已启动：${basename(executable)}`)
 }
 
@@ -285,6 +329,8 @@ function stopProcess(child) {
 async function restartImageRuntime() {
   stopProcess(imageProcess)
   imageProcess = null
+  imageRuntimeState.state = 'restarting'
+  imageRuntimeState.error = ''
   await startImageRuntime()
 }
 
