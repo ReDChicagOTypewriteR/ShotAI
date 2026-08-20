@@ -129,7 +129,7 @@ try {
     })
   })
 
-  await page.goto('http://127.0.0.1:5173/#workbench', {
+  await page.goto(`${process.env.SHOTAI_TEST_URL || 'http://127.0.0.1:5173/'}#workbench`, {
     waitUntil: 'networkidle',
     timeout: 20_000,
   })
@@ -338,9 +338,9 @@ try {
   if (
     !lightThemeMetrics ||
     !lightThemeMetrics.rootClass.includes('theme-light') ||
-    lightThemeMetrics.drawerBackground !== 'rgb(255, 255, 255)' ||
-    lightThemeMetrics.drawerColor !== 'rgb(16, 19, 22)' ||
-    lightThemeMetrics.textColor !== 'rgb(16, 19, 22)'
+    lightThemeMetrics.themeText !== '#121722' ||
+    lightThemeMetrics.drawerColor !== lightThemeMetrics.textColor ||
+    !lightThemeMetrics.drawerBackground.includes('1 1 1')
   ) {
     throw new Error(
       `teleported settings did not receive light theme: ${JSON.stringify(lightThemeMetrics)}`,

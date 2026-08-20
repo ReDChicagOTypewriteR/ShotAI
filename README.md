@@ -10,12 +10,14 @@
 
 <p align="center">
   <img alt="Build verified" src="https://img.shields.io/badge/build-verified-2ea44f?style=flat&amp;logo=githubactions&amp;logoColor=white" />
-  <img alt="Version 1.1.6" src="https://img.shields.io/badge/version-v1.1.6-2496ed?style=flat" />
+  <img alt="Version 1.1.7" src="https://img.shields.io/badge/version-v1.1.7-2496ed?style=flat" />
   <img alt="Vue 3.5.40" src="https://img.shields.io/badge/Vue-3.5.40-42b883?style=flat&amp;logo=vuedotjs&amp;logoColor=white" />
   <img alt="Electron 43.2.0" src="https://img.shields.io/badge/Electron-43.2.0-47848f?style=flat&amp;logo=electron&amp;logoColor=white" />
   <img alt="TypeScript 5.9.3" src="https://img.shields.io/badge/TypeScript-5.9.3-3178c6?style=flat&amp;logo=typescript&amp;logoColor=white" />
   <img alt="Ollama supported" src="https://img.shields.io/badge/Ollama-supported-111111?style=flat&amp;logo=ollama&amp;logoColor=white" />
+  <img alt="Host monitor" src="https://img.shields.io/badge/Host_Monitor-local_only-16a34a?style=flat&amp;logo=grafana&amp;logoColor=white" />
   <img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078d4?style=flat&amp;logo=windows11&amp;logoColor=white" />
+  <img alt="Ubuntu x64" src="https://img.shields.io/badge/Ubuntu-22.04%20x64-e95420?style=flat&amp;logo=ubuntu&amp;logoColor=white" />
   <img alt="Documentation included" src="https://img.shields.io/badge/docs-included-8b5cf6?style=flat&amp;logo=readthedocs&amp;logoColor=white" />
 </p>
 
@@ -50,7 +52,17 @@
 
 <p align="center"><sub>统一的对话、文件、模型与图片创作入口</sub></p>
 
-<p><sub>01 / OVERVIEW</sub></p>
+<p><sub>01 / RELEASE HIGHLIGHTS</sub></p>
+
+## 1.1.7 · 更像一套完整的本地 AI 平台
+
+| 全新工作台 | 主机监控 | 更轻的安装方式 |
+| --- | --- | --- |
+| Apple × SpaceX 视觉语言，加入毛玻璃、圆角、柔和阴影与自然过渡 | 仅运行 ShotAI 的主机可进入，查看在线设备、CPU、内存、磁盘与 NVIDIA 显卡状态 | Windows 聊天标准版约 806MB；图片生成组件可按需添加；仍提供完整离线版 |
+
+主机监控带独立管理员登录、IP 隐藏和登录失败限制；局域网普通使用者无法访问监控接口。默认登录信息保存在 `lan.config.json`，正式部署前请修改管理员密码。
+
+<p><sub>02 / OVERVIEW</sub></p>
 
 ## 一台主机，所有人直接使用
 
@@ -58,7 +70,7 @@ ShotAI 把本地模型、文件、资料库和图片能力放进同一个网页�
 
 ![ShotAI 局域网运行方式](docs/images/readme-network.svg)
 
-<p><sub>02 / CAPABILITIES</sub></p>
+<p><sub>03 / CAPABILITIES</sub></p>
 
 ## 已经可以做什么
 
@@ -72,19 +84,30 @@ ShotAI 把本地模型、文件、资料库和图片能力放进同一个网页�
 | 本地资料库 | 从导入资料中查找答案并显示来源 | Embedding 或关键词检索 |
 | 图片创作 | 在对话框内生成图片、参考图修改 | 本地图片模型与运行组件 |
 | 模型管理 | 一个入口完成识别、导入、查看和清理 | GGUF、mmproj 与图片配套文件 |
-| 内网共享 | 主机运行，其他电脑用浏览器访问 | Windows Electron 与 9090 服务 |
+| 主机监控 | 查看在线数量、隐藏 IP 和主机性能 | 仅限主机、管理员登录、实时轻量图表 |
+| 内网共享 | 主机运行，其他电脑用浏览器访问 | Windows / Ubuntu Electron 与 9090 服务 |
 
-<p><sub>03 / GET STARTED</sub></p>
+<p><sub>04 / GET STARTED</sub></p>
 
 ## 三步开始
 
-### Windows 使用者
+### Windows / Ubuntu 使用者
 
 1. 安装并启动 ShotAI；
 2. 在“模型管理”中添加已经下载好的模型；
 3. 将界面显示的 `http://主机IP:9090` 发给局域网使用者。
 
 模型不会随源码仓库提供。第一次部署请先阅读 [使用指南](docs/USER_GUIDE.md) 和 [内网部署说明](docs/LAN_DEPLOYMENT.md)。
+
+### Windows 安装包怎么选
+
+| 版本 | 适合谁 | 内置内容 |
+| --- | --- | --- |
+| 聊天标准版 | 主要使用对话、文件、资料库和图片识别 | Electron、Ollama、CUDA 12，不含模型，约 806MB |
+| 图片组件包 | 已安装标准版，后来需要本地生成与修改图片 | stable-diffusion.cpp CUDA 12 运行组件，不含模型 |
+| 完整离线版 | 希望一次带齐聊天与图片运行环境 | 上述全部运行组件，不含模型，体积约 1.6GB |
+
+安装包没有放进 Git 仓库，请从项目的 [GitHub Releases](https://github.com/ReDChicagOTypewriteR/ShotAI/releases) 下载发布版本。
 
 ### 本地开发
 
@@ -96,7 +119,7 @@ npm run dev
 
 工作台通常运行在 `http://127.0.0.1:5173/`。构建与检查命令见 [开发流程](docs/DEVELOPMENT_WORKFLOW.md)。
 
-<p><sub>04 / MODEL ROUTING</sub></p>
+<p><sub>05 / MODEL ROUTING</sub></p>
 
 ## 模型如何分工
 
@@ -111,7 +134,7 @@ ShotAI 会根据任务使用对应能力，不要求使用者频繁手动切换�
 
 相同的模型文件只保存一份，可以被多个功能共同使用。兼容范围和导入排错见 [内网部署说明](docs/LAN_DEPLOYMENT.md)。
 
-<p><sub>05 / DOCUMENTATION</sub></p>
+<p><sub>06 / DOCUMENTATION</sub></p>
 
 ## 文档
 
@@ -120,6 +143,7 @@ ShotAI 会根据任务使用对应能力，不要求使用者频繁手动切换�
 | 第一次安装和使用 | [第一次使用指南](docs/USER_GUIDE.md) |
 | 在单位局域网中运行 | [内网部署与排错](docs/LAN_DEPLOYMENT.md) |
 | Windows 客户端与打包 | [Electron 客户端说明](docs/ELECTRON_WINDOWS_GUIDE.md) |
+| Ubuntu 客户端与打包 | [Ubuntu 客户端说明](docs/UBUNTU_GUIDE.md) · [V100 离线模型方案](docs/UBUNTU_OFFLINE_MODELS.md) |
 | 当前功能与边界 | [当前功能说明](docs/CURRENT_FEATURES.md) |
 | 开发、检查和发布 | [开发流程](docs/DEVELOPMENT_WORKFLOW.md) |
 | 查看全部说明 | [文档中心](docs/README.md) |
@@ -127,7 +151,7 @@ ShotAI 会根据任务使用对应能力，不要求使用者频繁手动切换�
 <details>
 <summary><strong>使用前需要知道的边界</strong></summary>
 
-- 当前没有账号登录、HTTPS、审计日志或跨浏览器共享记录；
+- 普通工作台当前没有账号登录、HTTPS、审计日志或跨浏览器共享记录；主机监控使用独立的本机管理员登录；
 - 会话、设置和资料索引默认保存在当前浏览器；
 - 多人同时运行大模型或生成图片时，速度与稳定性取决于主机配置；
 - 扫描 PDF 暂不支持文字识别，旧版 `.doc` 需要先转换为 `.docx`；

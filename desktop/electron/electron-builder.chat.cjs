@@ -16,18 +16,9 @@ module.exports = {
         'lib/ollama/cuda_v12/**/*',
       ],
     },
-    {
-      from: 'vendor/stable-diffusion.cpp/windows',
-      to: 'runtime/image',
-      filter: [
-        'sd-server.exe',
-        '*.dll',
-        'SHOTAI_RUNTIME_INFO.txt',
-      ],
-    },
   ],
   win: {
     ...build.win,
-    artifactName: 'ShotAI-${version}-Windows-${arch}-Full-CUDA12-Setup.${ext}',
+    artifactName: 'ShotAI-${version}-Windows-${arch}-Chat-CUDA12-Setup.${ext}',
   },
 }

@@ -5,6 +5,7 @@ const browser = await chromium.launch({
   executablePath:
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
 })
+const appUrl = process.env.SHOTAI_TEST_URL || 'http://127.0.0.1:5173'
 let created = false
 let createPayload
 const uploadedDigests = new Set()
@@ -120,7 +121,7 @@ try {
     })
   })
 
-  await page.goto('http://127.0.0.1:5173/#workbench', {
+  await page.goto(`${appUrl}/#workbench`, {
     waitUntil: 'networkidle',
     timeout: 20_000,
   })
@@ -144,6 +145,45 @@ try {
     throw new Error(`unexpected GGUF validation message: ${validationText}`)
   }
   await page.getByRole('button', { name: '取消' }).click()
+
+  await page.locator('.composer-tool-button').click()
+  await page.getByText('管理 AI 模型', { exact: true }).click()
+  await page
+    .getByLabel('模型管理')
+    .getByRole('button', { name: '添加模型', exact: true })
+    .click()
+  await page.locator('.model-uploader input[type="file"]').setInputFiles([
+    {
+      name: 'Qwen-Test-00001-of-00002.gguf',
+      mimeType: 'application/octet-stream',
+      buffer: createFakeGguf('split-part-one'),
+    },
+    {
+      name: 'Qwen-Test-00002-of-00002.gguf',
+      mimeType: 'application/octet-stream',
+      buffer: createFakeGguf('split-part-two'),
+    },
+  ])
+  await page.getByText('已识别为 2 个 GGUF 分片', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '下一步' }).click()
+  await page.getByLabel('显示名称').fill('shotai-split-test')
+  await page.getByRole('button', { name: '下一步' }).click()
+  await page.getByRole('button', { name: '开始导入' }).click()
+  await page.waitForFunction(
+    () => document.body.innerText.includes('模型导入成功'),
+    undefined,
+    { timeout: 20_000 },
+  )
+  const splitFiles = createPayload?.files ?? {}
+  if (
+    !splitFiles['Qwen-Test-00001-of-00002.gguf'] ||
+    !splitFiles['Qwen-Test-00002-of-00002.gguf']
+  ) {
+    throw new Error(`split model files were not preserved: ${JSON.stringify(splitFiles)}`)
+  }
+  await page.getByRole('button', { name: '使用此模型' }).click()
+  createPayload = undefined
+
   await page.locator('.composer-tool-button').click()
   await page.getByText('管理 AI 模型', { exact: true }).click()
   await page
@@ -200,6 +240,7 @@ try {
       {
         pairedFiles: Object.keys(files),
         oneCreateRequest: true,
+        splitGgufSupported: true,
         metadataFreeGgufRejected: true,
         visionCapabilityVerified: true,
         createdModel: createPayload.model,

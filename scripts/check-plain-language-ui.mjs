@@ -123,7 +123,7 @@ try {
     })
   })
 
-  await page.goto('http://127.0.0.1:5173/#workbench', {
+  await page.goto(`${process.env.SHOTAI_TEST_URL || 'http://127.0.0.1:5173/'}#workbench`, {
     waitUntil: 'networkidle',
     timeout: 20_000,
   })
@@ -160,7 +160,7 @@ try {
     viewport: { width: 1440, height: 960 },
   })
   portal.setDefaultTimeout(6_000)
-  await portal.goto('http://127.0.0.1:5174/', {
+  await portal.goto(process.env.SHOTAI_PORTAL_TEST_URL || 'http://127.0.0.1:5174/', {
     waitUntil: 'networkidle',
     timeout: 20_000,
   })

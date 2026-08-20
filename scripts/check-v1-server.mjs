@@ -50,6 +50,7 @@ try {
   server.stderr.on('data', (chunk) => process.stderr.write(chunk))
   const system = await waitForServer()
   assert.equal(system.version, '1.0.0')
+  assert.equal(system.platform, process.platform)
   assert.equal(system.canManage, true)
   assert.equal(system.isHost, true)
 
@@ -86,6 +87,7 @@ try {
       {
         systemEndpoint: true,
         versionReported: true,
+        hostPlatformReported: true,
         hostManagementDetected: true,
         streamedImageModelUpload: true,
         imageModelDelete: true,

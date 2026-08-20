@@ -100,7 +100,9 @@ function writeRuntimeConfig() {
 }
 
 function executableCandidates(name, relativeDirectory) {
-  const names = process.platform === 'win32' ? [`${name}.exe`, name] : [name]
+  const names = process.platform === 'win32'
+    ? [`${name}.exe`, name]
+    : [name, join('bin', name)]
   const roots = [
     join(dataRoot, 'runtime', relativeDirectory),
     join(process.resourcesPath, 'runtime', relativeDirectory),
@@ -142,7 +144,17 @@ function openProcessLog(name) {
 async function startOllama() {
   const versionUrl = new URL('/api/version', config.ollamaUrl).toString()
   if (await endpointOnline(versionUrl)) {
-    log('检测到已经运行的 Ollama。')
+    let version = '未知版本'
+    try {
+      const response = await fetch(versionUrl)
+      const body = await response.json()
+      version = body.version || version
+    } catch {
+      // The service is online; version details are diagnostic only.
+    }
+    log(
+      `检测到已经运行的 Ollama（${version}，${config.ollamaUrl}）。将使用这个服务，内置 Ollama 不会重复启动。`,
+    )
     return
   }
   const executable = findExecutable('ollama', 'ollama')
@@ -307,7 +319,7 @@ async function startImageRuntime() {
     if (imageProcess !== child) return
     imageRuntimeState.state = code === 0 ? 'stopped' : 'error'
     if (code !== 0) {
-      imageRuntimeState.error = `图片服务启动后停止，代码 ${code}。请查看 logs\\image-runtime.log。`
+      imageRuntimeState.error = `图片服务启动后停止，代码 ${code}。请查看 logs/image-runtime.log。`
     }
     log(`图片服务已停止，代码：${code}`)
   })

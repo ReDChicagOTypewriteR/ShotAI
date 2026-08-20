@@ -53,12 +53,12 @@ try {
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
   })
 
-  await page.goto('http://127.0.0.1:5173/', { waitUntil: 'networkidle' })
+  await page.goto(process.env.SHOTAI_TEST_URL || 'http://127.0.0.1:5173/', { waitUntil: 'networkidle' })
   await page.getByPlaceholder(/输入问题/).fill('请测试回答')
   await page.getByPlaceholder(/输入问题/).press('Enter')
   await page.getByText('这次回答已经到达长度上限。').waitFor()
 
-  if (!(await page.locator('.formatted-answer h3').count())) throw new Error('answer heading was not highlighted')
+  if (!(await page.locator('.formatted-answer h2, .formatted-answer h3').count())) throw new Error('answer heading was not highlighted')
   if (!(await page.locator('.formatted-answer strong').count())) throw new Error('answer emphasis was not highlighted')
   if (!(await page.locator('.formatted-answer code').count())) throw new Error('inline code was not highlighted')
 
@@ -75,9 +75,8 @@ try {
   await page.waitForTimeout(500)
   await page.screenshot({ path: '/private/tmp/shotai-settings-improvements.png', fullPage: false })
   await page.keyboard.press('Escape')
-
-  await page.getByLabel('打开设置').click()
-  await page.getByRole('button', { name: /模型管理/ }).click()
+  await page.locator('.el-overlay:visible').first().waitFor({ state: 'hidden' })
+  await page.getByLabel('打开模型管理').click()
   await page.getByLabel('删除 local-test:latest').click()
   await page.getByRole('button', { name: '确认删除' }).click()
   await page.getByText('模型已删除', { exact: true }).waitFor()

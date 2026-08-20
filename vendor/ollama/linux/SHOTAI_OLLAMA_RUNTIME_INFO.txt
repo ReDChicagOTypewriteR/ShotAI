@@ -1,0 +1,9 @@
+ShotAI Ubuntu bundled runtime
+Component: Ollama Linux AMD64 with NVIDIA CUDA libraries
+Version: v0.32.14
+Official source: https://github.com/ollama/ollama/releases/tag/v0.32.14
+Archive: ollama-linux-amd64.tar.zst
+Archive SHA-256: c620917a71e146ab3a7f893084f066069c4c65d144ef8379a91c3cbe8b27de8f
+License: MIT (see LICENSE.ollama.txt)
+
+These files are redistributed unchanged from the official Ollama release.

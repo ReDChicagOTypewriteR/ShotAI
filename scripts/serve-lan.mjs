@@ -7,13 +7,24 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  statfsSync,
   statSync,
   unlinkSync,
 } from 'node:fs'
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { execFile } from 'node:child_process'
 import { createServer, request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import { networkInterfaces } from 'node:os'
+import {
+  cpus,
+  freemem,
+  hostname,
+  networkInterfaces,
+  platform as operatingSystemPlatform,
+  release as operatingSystemRelease,
+  totalmem,
+  uptime,
+} from 'node:os'
 import { basename, dirname, extname, join, normalize, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -76,6 +87,23 @@ const imageRuntimeDirectory = process.env.SHOTAI_IMAGE_RUNTIME_DIRECTORY
 const ollamaModelDirectory = join(dataDirectory, 'models', 'ollama')
 const releaseVersion = process.env.SHOTAI_VERSION || fileConfig.version || '1.0.0'
 const allowLanAdministration = fileConfig.allowLanAdministration === true
+const monitorConfig = fileConfig.monitoring || {}
+const monitorUsername = String(
+  process.env.SHOTAI_MONITOR_USERNAME || monitorConfig.username || 'admin',
+)
+const monitorPassword = String(
+  process.env.SHOTAI_MONITOR_PASSWORD || monitorConfig.password || 'alexjoker443477',
+)
+const monitorSessions = new Map()
+const monitorLoginFailures = new Map()
+const connectedClients = new Map()
+const MONITOR_SESSION_COOKIE = 'shotai_monitor_session'
+const MONITOR_SESSION_TTL_MS = 8 * 60 * 60 * 1000
+const CLIENT_ONLINE_TTL_MS = 70 * 1000
+let serverStartedAt = Date.now()
+let requestCount = 0
+let previousCpuSnapshot = null
+let gpuSnapshot = { checkedAt: 0, value: null }
 const localAddresses = new Set(
   Object.values(networkInterfaces())
     .flat()
@@ -114,6 +142,8 @@ function respondJson(response, statusCode, body) {
   response.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
   })
   response.end(JSON.stringify(body))
 }
@@ -124,8 +154,197 @@ function normalizeRemoteAddress(address = '') {
 
 function canManageRequest(request) {
   if (allowLanAdministration) return true
+  return isHostRequest(request)
+}
+
+function isHostRequest(request) {
   const remoteAddress = normalizeRemoteAddress(request.socket.remoteAddress)
   return localAddresses.has(remoteAddress)
+}
+
+function constantTimeEqual(left, right) {
+  const leftDigest = createHash('sha256').update(String(left)).digest()
+  const rightDigest = createHash('sha256').update(String(right)).digest()
+  return timingSafeEqual(leftDigest, rightDigest)
+}
+
+function parseCookies(request) {
+  return Object.fromEntries(
+    String(request.headers.cookie || '')
+      .split(';')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const separator = part.indexOf('=')
+        return separator === -1
+          ? [part, '']
+          : [part.slice(0, separator), decodeURIComponent(part.slice(separator + 1))]
+      }),
+  )
+}
+
+function monitorSession(request) {
+  const token = parseCookies(request)[MONITOR_SESSION_COOKIE]
+  const expiresAt = token ? monitorSessions.get(token) : 0
+  if (!token || !expiresAt || expiresAt <= Date.now()) {
+    if (token) monitorSessions.delete(token)
+    return ''
+  }
+  monitorSessions.set(token, Date.now() + MONITOR_SESSION_TTL_MS)
+  return token
+}
+
+function requireHostMonitorAccess(request, response) {
+  if (!isHostRequest(request)) {
+    respondJson(response, 403, { error: '监控平台只能在运行 ShotAI 的主机上访问' })
+    return false
+  }
+  if (!monitorSession(request)) {
+    respondJson(response, 401, { error: '请先登录监控平台' })
+    return false
+  }
+  return true
+}
+
+function markClientOnline(request, requestUrl) {
+  if (requestUrl.pathname.startsWith('/shotai/monitor')) return
+  const address = normalizeRemoteAddress(request.socket.remoteAddress)
+  if (!address) return
+  const existing = connectedClients.get(address) || {}
+  connectedClients.set(address, {
+    address,
+    firstSeen: existing.firstSeen || Date.now(),
+    lastSeen: Date.now(),
+    userAgent: String(request.headers['user-agent'] || '').slice(0, 220),
+    host: localAddresses.has(address),
+  })
+}
+
+function pruneRuntimeState() {
+  const now = Date.now()
+  for (const [address, client] of connectedClients) {
+    if (now - client.lastSeen > CLIENT_ONLINE_TTL_MS) connectedClients.delete(address)
+  }
+  for (const [token, expiresAt] of monitorSessions) {
+    if (expiresAt <= now) monitorSessions.delete(token)
+  }
+  for (const [address, failure] of monitorLoginFailures) {
+    if (now - failure.lastAttempt > 15 * 60 * 1000) monitorLoginFailures.delete(address)
+  }
+}
+
+function cpuSnapshot() {
+  return cpus().reduce(
+    (summary, cpu) => {
+      const values = Object.values(cpu.times)
+      summary.idle += cpu.times.idle
+      summary.total += values.reduce((sum, value) => sum + value, 0)
+      return summary
+    },
+    { idle: 0, total: 0 },
+  )
+}
+
+function currentCpuUsage() {
+  const current = cpuSnapshot()
+  if (!previousCpuSnapshot) {
+    previousCpuSnapshot = current
+    return 0
+  }
+  const totalDelta = current.total - previousCpuSnapshot.total
+  const idleDelta = current.idle - previousCpuSnapshot.idle
+  previousCpuSnapshot = current
+  if (totalDelta <= 0) return 0
+  return Math.max(0, Math.min(100, ((totalDelta - idleDelta) / totalDelta) * 100))
+}
+
+function readGpuUsage() {
+  if (Date.now() - gpuSnapshot.checkedAt < 4_000) {
+    return Promise.resolve(gpuSnapshot.value)
+  }
+  return new Promise((resolveGpu) => {
+    execFile(
+      process.platform === 'win32' ? 'nvidia-smi.exe' : 'nvidia-smi',
+      [
+        '--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu',
+        '--format=csv,noheader,nounits',
+      ],
+      { windowsHide: true, timeout: 2_500 },
+      (error, stdout) => {
+        let value = null
+        if (!error && stdout.trim()) {
+          const [name, usage, memoryUsed, memoryTotal, temperature] = stdout
+            .trim()
+            .split('\n')[0]
+            .split(',')
+            .map((item) => item.trim())
+          value = {
+            name,
+            usagePercent: Number(usage) || 0,
+            memoryUsedBytes: (Number(memoryUsed) || 0) * 1024 * 1024,
+            memoryTotalBytes: (Number(memoryTotal) || 0) * 1024 * 1024,
+            temperatureCelsius: Number(temperature) || 0,
+          }
+        }
+        gpuSnapshot = { checkedAt: Date.now(), value }
+        resolveGpu(value)
+      },
+    )
+  })
+}
+
+async function getMonitorSnapshot() {
+  pruneRuntimeState()
+  const memoryTotal = totalmem()
+  const memoryUsed = memoryTotal - freemem()
+  let disk = null
+  try {
+    const stats = statfsSync(existsSync(dataDirectory) ? dataDirectory : projectDirectory)
+    const totalBytes = stats.blocks * stats.bsize
+    const freeBytes = stats.bavail * stats.bsize
+    disk = {
+      totalBytes,
+      usedBytes: totalBytes - freeBytes,
+      usagePercent: totalBytes ? ((totalBytes - freeBytes) / totalBytes) * 100 : 0,
+    }
+  } catch {
+    // Older Node runtimes can still show CPU, memory and GPU information.
+  }
+  const clients = [...connectedClients.values()]
+    .sort((left, right) => right.lastSeen - left.lastSeen)
+    .map((client) => ({
+      ip: client.address,
+      host: client.host,
+      firstSeen: client.firstSeen,
+      lastSeen: client.lastSeen,
+      userAgent: client.userAgent,
+    }))
+  return {
+    generatedAt: Date.now(),
+    onlineCount: clients.length,
+    clients,
+    host: {
+      name: hostname(),
+      platform: operatingSystemPlatform(),
+      release: operatingSystemRelease(),
+      uptimeSeconds: uptime(),
+      serverUptimeSeconds: Math.floor((Date.now() - serverStartedAt) / 1000),
+    },
+    performance: {
+      cpu: { usagePercent: currentCpuUsage(), cores: cpus().length },
+      memory: {
+        usedBytes: memoryUsed,
+        totalBytes: memoryTotal,
+        usagePercent: memoryTotal ? (memoryUsed / memoryTotal) * 100 : 0,
+      },
+      disk,
+      gpu: await readGpuUsage(),
+      process: {
+        memoryBytes: process.memoryUsage().rss,
+        requestCount,
+      },
+    },
+  }
 }
 
 function isProtectedOllamaRequest(request, requestUrl) {
@@ -633,12 +852,105 @@ function serveStatic(request, response, requestUrl) {
 
 const server = createServer(async (request, response) => {
   const requestUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`)
+  requestCount += 1
+  markClientOnline(request, requestUrl)
+
+  if (requestUrl.pathname === '/shotai/monitor/session') {
+    if (!isHostRequest(request)) {
+      respondJson(response, 403, { error: '监控平台只能在运行 ShotAI 的主机上访问' })
+      return
+    }
+    respondJson(response, 200, {
+      authenticated: Boolean(monitorSession(request)),
+      username: monitorUsername,
+    })
+    return
+  }
+
+  if (requestUrl.pathname === '/shotai/monitor/login') {
+    if (!isHostRequest(request)) {
+      respondJson(response, 403, { error: '监控平台只能在运行 ShotAI 的主机上访问' })
+      return
+    }
+    if (request.method !== 'POST') {
+      respondJson(response, 405, { error: '不支持这项操作' })
+      return
+    }
+    const remoteAddress = normalizeRemoteAddress(request.socket.remoteAddress)
+    const failure = monitorLoginFailures.get(remoteAddress) || {
+      attempts: 0,
+      lockedUntil: 0,
+      lastAttempt: 0,
+    }
+    if (failure.lockedUntil > Date.now()) {
+      respondJson(response, 429, { error: '尝试次数过多，请稍后再试' })
+      return
+    }
+    try {
+      const body = await readJsonRequest(request, 8 * 1024)
+      const valid =
+        constantTimeEqual(body.username, monitorUsername) &&
+        constantTimeEqual(body.password, monitorPassword)
+      if (!valid) {
+        failure.attempts += 1
+        failure.lastAttempt = Date.now()
+        if (failure.attempts >= 5) {
+          failure.lockedUntil = Date.now() + 60 * 1000
+          failure.attempts = 0
+        }
+        monitorLoginFailures.set(remoteAddress, failure)
+        respondJson(response, 401, { error: '用户名或密码不正确' })
+        return
+      }
+      monitorLoginFailures.delete(remoteAddress)
+      const token = randomBytes(32).toString('hex')
+      monitorSessions.set(token, Date.now() + MONITOR_SESSION_TTL_MS)
+      response.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Set-Cookie': `${MONITOR_SESSION_COOKIE}=${token}; Path=/shotai/monitor; HttpOnly; SameSite=Strict; Max-Age=${MONITOR_SESSION_TTL_MS / 1000}`,
+        'X-Content-Type-Options': 'nosniff',
+      })
+      response.end(JSON.stringify({ authenticated: true, username: monitorUsername }))
+    } catch (error) {
+      respondJson(response, 400, { error: error.message || '登录信息无法识别' })
+    }
+    return
+  }
+
+  if (requestUrl.pathname === '/shotai/monitor/logout') {
+    if (!isHostRequest(request)) {
+      respondJson(response, 403, { error: '监控平台只能在运行 ShotAI 的主机上访问' })
+      return
+    }
+    const token = monitorSession(request)
+    if (token) monitorSessions.delete(token)
+    response.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'Set-Cookie': `${MONITOR_SESSION_COOKIE}=; Path=/shotai/monitor; HttpOnly; SameSite=Strict; Max-Age=0`,
+      'X-Content-Type-Options': 'nosniff',
+    })
+    response.end(JSON.stringify({ authenticated: false }))
+    return
+  }
+
+  if (requestUrl.pathname === '/shotai/monitor/snapshot') {
+    if (!requireHostMonitorAccess(request, response)) return
+    if (request.method !== 'GET') {
+      respondJson(response, 405, { error: '不支持这项操作' })
+      return
+    }
+    respondJson(response, 200, await getMonitorSnapshot())
+    return
+  }
 
   if (requestUrl.pathname === '/shotai/system') {
     const canManage = canManageRequest(request)
     respondJson(response, 200, {
       version: releaseVersion,
-      isHost: canManage && !allowLanAdministration,
+      platform: process.platform,
+      isHost: isHostRequest(request),
       canManage,
       port,
     })

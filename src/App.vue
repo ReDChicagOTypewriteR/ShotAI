@@ -28,6 +28,7 @@ import {
   Lock,
   MagicStick,
   Menu,
+  Monitor,
   Moon,
   MoreFilled,
   Paperclip,
@@ -37,7 +38,11 @@ import {
   Search,
   Setting,
   Sunny,
+  SwitchButton,
   UploadFilled,
+  User,
+  View,
+  Hide,
 } from '@element-plus/icons-vue'
 import {
   BubbleList,
@@ -108,10 +113,17 @@ import {
   uploadImageModelFile,
 } from './services/image-runtime'
 import type { ImageRuntimeStatus } from './services/image-runtime'
-import { cleanupModelCache, getShotAISystemInfo } from './services/system'
-import type { ShotAISystemInfo } from './services/system'
+import {
+  cleanupModelCache,
+  getMonitorSession,
+  getMonitorSnapshot,
+  getShotAISystemInfo,
+  loginMonitor,
+  logoutMonitor,
+} from './services/system'
+import type { MonitorSnapshot, ShotAISystemInfo } from './services/system'
 
-type ViewKey = 'chat' | 'models' | 'knowledge' | 'diagnostics' | 'settings'
+type ViewKey = 'chat' | 'models' | 'knowledge' | 'diagnostics' | 'settings' | 'monitor'
 type ModelStatus = 'ready' | 'sleeping' | 'checking'
 type OllamaConnectionState = 'checking' | 'online' | 'degraded' | 'offline'
 type ImageCanvas = 'square' | 'landscape' | 'portrait'
@@ -243,6 +255,19 @@ const diagnosticsDrawerOpen = ref(false)
 const settingsDrawerOpen = ref(false)
 const knowledgeDrawerOpen = ref(false)
 const imageStudioOpen = ref(false)
+const monitorDrawerOpen = ref(false)
+const monitorAuthenticated = ref(false)
+const monitorLoading = ref(false)
+const monitorLoginLoading = ref(false)
+const monitorLoginError = ref('')
+const monitorUsername = ref('admin')
+const monitorPassword = ref('')
+const monitorPasswordVisible = ref(false)
+const monitorHideIps = ref(true)
+const monitorSnapshot = ref<MonitorSnapshot | null>(null)
+const monitorCpuHistory = ref<number[]>([])
+const monitorMemoryHistory = ref<number[]>([])
+const monitorGpuHistory = ref<number[]>([])
 const imagePrompt = ref('')
 const AUTO_IMAGE_PROVIDER_ID = 'auto'
 const imageModelId = ref(AUTO_IMAGE_PROVIDER_ID)
@@ -271,6 +296,7 @@ const imageRuntime = ref<ImageRuntimeStatus>({
 })
 const systemInfo = ref<ShotAISystemInfo>({
   version: '1.0.0',
+  platform: 'unknown',
   isHost: true,
   canManage: true,
   port: 9090,
@@ -317,6 +343,7 @@ const pendingImages = ref<MessageImage[]>([])
 const pendingAttachments = ref<MessageAttachment[]>([])
 const selectedFiles = ref<UploadUserFile[]>([])
 const selectedImportFile = ref<File | null>(null)
+const selectedModelFiles = ref<File[]>([])
 const selectedProjectorFile = ref<File | null>(null)
 const selectedImageImportFiles = ref<File[]>([])
 const importFileShas = ref<Record<string, string>>({})
@@ -325,6 +352,7 @@ const importName = ref('')
 const importSha = ref('')
 const importProjectorSha = ref('')
 const importDetectedCapabilities = ref<string[]>([])
+const importFailureDetail = ref('')
 const ollamaConnected = ref(false)
 const ollamaConnectionState = ref<OllamaConnectionState>('checking')
 const ollamaVersion = ref('未检测')
@@ -353,6 +381,7 @@ let chatController: AbortController | undefined
 let imageController: AbortController | undefined
 let imageProgressTimer: number | undefined
 let healthTimer: number | undefined
+let monitorTimer: number | undefined
 let persistenceTimer: number | undefined
 let knowledgePersistenceTimer: number | undefined
 let messageId = 10
@@ -529,7 +558,7 @@ const imageProviderOptions = computed<ImageProviderOption[]>(() => [
         {
           id: 'local-runtime',
           label: imageRuntime.value.modelLabel,
-          detail: 'Windows 本地图片组件',
+          detail: '本地图片组件',
           kind: 'local-runtime' as const,
           modelId: imageRuntime.value.modelLabel,
         },
@@ -543,6 +572,13 @@ const imageProviderOptions = computed<ImageProviderOption[]>(() => [
     modelId: model.id,
   })),
 ])
+
+const hostPlatformLabel = computed(() => {
+  if (systemInfo.value.platform === 'linux') return 'Ubuntu / Linux'
+  if (systemInfo.value.platform === 'win32') return 'Windows'
+  if (systemInfo.value.platform === 'darwin') return 'macOS'
+  return '主机'
+})
 
 const selectedImageProvider = computed(() => {
   if (imageModelId.value === AUTO_IMAGE_PROVIDER_ID) {
@@ -881,7 +917,7 @@ const importMetadata = computed(() => {
   const files: File[] =
     importMode.value === 'image'
       ? selectedImageImportFiles.value
-      : ([selectedImportFile.value, selectedProjectorFile.value].filter(
+      : ([...selectedModelFiles.value, selectedProjectorFile.value].filter(
           Boolean,
         ) as File[])
   const fileName =
@@ -898,6 +934,7 @@ const importMetadata = computed(() => {
     isVisionImport:
       importMode.value === 'chat' && Boolean(selectedProjectorFile.value),
     isImageImport: importMode.value === 'image',
+    modelFileCount: selectedModelFiles.value.length,
     fileCount: files.length,
     size: totalSize
       ? `${(totalSize / 1024 / 1024 / 1024).toFixed(2)} GB`
@@ -941,6 +978,20 @@ const importDetection = computed(() => {
       title: '已自动组合为图片模型',
       detail: '两个文件会一起安装。安装完成后，系统还会自动验证是否真的可以识别图片。',
     }
+  }
+  if (selectedModelFiles.value.length > 1) {
+    const splitError = validateSplitGgufFiles(selectedModelFiles.value)
+    return splitError
+      ? {
+          tone: 'warning',
+          title: '模型分片选择不完整或不匹配',
+          detail: splitError,
+        }
+      : {
+          tone: 'success',
+          title: `已识别为 ${selectedModelFiles.value.length} 个 GGUF 分片`,
+          detail: '全部分片会按顺序校验、写入并组合为一个模型，不会把较小分片误认为图片配套文件。',
+        }
   }
   return {
     tone: 'success',
@@ -1377,6 +1428,132 @@ function toggleConversationSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
 }
 
+function formatMonitorBytes(bytes = 0) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 GB'
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(0)} MB`
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+}
+
+function formatMonitorDuration(seconds = 0) {
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (days) return `${days} 天 ${hours} 小时`
+  if (hours) return `${hours} 小时 ${minutes} 分钟`
+  return `${Math.max(0, minutes)} 分钟`
+}
+
+function maskMonitorIp(ip: string) {
+  if (!monitorHideIps.value) return ip
+  if (ip.includes(':')) {
+    const parts = ip.split(':').filter(Boolean)
+    return `${parts.slice(0, 2).join(':')}:••••`
+  }
+  const parts = ip.split('.')
+  return parts.length === 4 ? `${parts[0]}.${parts[1]}.•••.•••` : '••••••••'
+}
+
+function monitorClientLabel(userAgent: string) {
+  if (/Edg\//i.test(userAgent)) return 'Microsoft Edge'
+  if (/Chrome\//i.test(userAgent)) return 'Google Chrome'
+  if (/Firefox\//i.test(userAgent)) return 'Firefox'
+  if (/Safari\//i.test(userAgent)) return 'Safari'
+  return '浏览器设备'
+}
+
+function appendMonitorHistory(target: { value: number[] }, value = 0) {
+  target.value = [...target.value.slice(-23), Math.max(0, Math.min(100, value))]
+}
+
+function monitorChartPoints(values: number[]) {
+  const normalized = values.length > 1 ? values : [0, values[0] || 0]
+  return normalized
+    .map((value, index) => {
+      const x = (index / Math.max(1, normalized.length - 1)) * 100
+      const y = 42 - (Math.max(0, Math.min(100, value)) / 100) * 38
+      return `${x.toFixed(2)},${y.toFixed(2)}`
+    })
+    .join(' ')
+}
+
+async function refreshMonitor() {
+  if (!monitorAuthenticated.value || monitorLoading.value) return
+  monitorLoading.value = true
+  try {
+    const snapshot = await getMonitorSnapshot()
+    monitorSnapshot.value = snapshot
+    appendMonitorHistory(monitorCpuHistory, snapshot.performance.cpu.usagePercent)
+    appendMonitorHistory(monitorMemoryHistory, snapshot.performance.memory.usagePercent)
+    appendMonitorHistory(monitorGpuHistory, snapshot.performance.gpu?.usagePercent || 0)
+  } catch (error) {
+    monitorAuthenticated.value = false
+    monitorLoginError.value = getErrorMessage(error)
+    if (monitorTimer) window.clearInterval(monitorTimer)
+    monitorTimer = undefined
+  } finally {
+    monitorLoading.value = false
+  }
+}
+
+function startMonitorRefresh() {
+  if (monitorTimer) window.clearInterval(monitorTimer)
+  void refreshMonitor()
+  monitorTimer = window.setInterval(() => void refreshMonitor(), 4_000)
+}
+
+async function openMonitor() {
+  if (!systemInfo.value.isHost) {
+    ElMessage.warning('监控平台只能在运行 ShotAI 的主机上打开')
+    return
+  }
+  monitorDrawerOpen.value = true
+  monitorLoginError.value = ''
+  try {
+    const session = await getMonitorSession()
+    monitorAuthenticated.value = session.authenticated
+    monitorUsername.value = session.username || 'admin'
+    if (session.authenticated) startMonitorRefresh()
+  } catch (error) {
+    monitorAuthenticated.value = false
+    monitorLoginError.value = getErrorMessage(error)
+  }
+}
+
+async function submitMonitorLogin() {
+  if (!monitorUsername.value.trim() || !monitorPassword.value) {
+    monitorLoginError.value = '请输入用户名和密码'
+    return
+  }
+  monitorLoginLoading.value = true
+  monitorLoginError.value = ''
+  try {
+    const session = await loginMonitor(
+      monitorUsername.value.trim(),
+      monitorPassword.value,
+    )
+    monitorAuthenticated.value = session.authenticated
+    monitorPassword.value = ''
+    startMonitorRefresh()
+  } catch (error) {
+    monitorLoginError.value = getErrorMessage(error)
+  } finally {
+    monitorLoginLoading.value = false
+  }
+}
+
+async function signOutMonitor() {
+  try {
+    await logoutMonitor()
+  } catch {
+    // A stale session is already effectively signed out.
+  }
+  monitorAuthenticated.value = false
+  monitorSnapshot.value = null
+  monitorPassword.value = ''
+  if (monitorTimer) window.clearInterval(monitorTimer)
+  monitorTimer = undefined
+}
+
 function switchView(view: ViewKey) {
   activeView.value = view
   sidebarOpen.value = false
@@ -1398,6 +1575,11 @@ function switchView(view: ViewKey) {
 
   if (view === 'settings') {
     settingsDrawerOpen.value = true
+    activeView.value = 'chat'
+  }
+
+  if (view === 'monitor') {
+    void openMonitor()
     activeView.value = 'chat'
   }
 }
@@ -3330,6 +3512,37 @@ function isVisionProjectorFile(file: File) {
   return /(^|[-_.])(mmproj|projector)([-_.]|$)/i.test(file.name)
 }
 
+function getSplitGgufPart(file: File) {
+  const match = file.name.match(/^(.*?)[-_.](\d{5})-of-(\d{5})\.gguf$/i)
+  if (!match) return null
+  return {
+    family: match[1].toLowerCase(),
+    index: Number(match[2]),
+    total: Number(match[3]),
+  }
+}
+
+function validateSplitGgufFiles(files: File[]) {
+  if (files.length <= 1) return ''
+  const parts = files.map(getSplitGgufPart)
+  if (parts.some((part) => !part)) {
+    return '检测到多个主要模型文件，但它们不是规范的 GGUF 分片。请只选择一个单文件模型，或一次选中名称为 00001-of-000NN 的全部分片。'
+  }
+  const first = parts[0]!
+  if (
+    parts.some(
+      (part) => part!.family !== first.family || part!.total !== first.total,
+    )
+  ) {
+    return '这些 GGUF 分片不属于同一个模型或版本，请从同一下载页面重新选择。'
+  }
+  const indexes = new Set(parts.map((part) => part!.index))
+  if (first.total !== files.length || indexes.size !== first.total) {
+    return `模型分片不完整：应有 ${first.total} 个文件，当前选择了 ${files.length} 个。请一次选中全部分片。`
+  }
+  return ''
+}
+
 function handleFileChange(_uploadFile: UploadFile, uploadFiles: UploadFiles) {
   selectedFiles.value = uploadFiles
   const rawFiles = uploadFiles
@@ -3346,11 +3559,13 @@ function handleFileChange(_uploadFile: UploadFile, uploadFiles: UploadFiles) {
   importSha.value = ''
   importProjectorSha.value = ''
   importDetectedCapabilities.value = []
+  importFailureDetail.value = ''
 
   if (imageFilesSelected) {
     importMode.value = 'image'
     selectedImageImportFiles.value = rawFiles
     selectedImportFile.value = null
+    selectedModelFiles.value = []
     selectedProjectorFile.value = null
     const main = rawFiles.find(isImageGenerationMainFile) ||
       rawFiles.find(isSingleImageModelFile) || rawFiles[0]
@@ -3365,18 +3580,24 @@ function handleFileChange(_uploadFile: UploadFile, uploadFiles: UploadFiles) {
   let projectorFiles = rawFiles.filter(isVisionProjectorFile)
   let modelFiles = rawFiles.filter((file) => !isVisionProjectorFile(file))
 
-  if (rawFiles.length === 2 && projectorFiles.length === 0) {
+  if (
+    rawFiles.length === 2 &&
+    projectorFiles.length === 0 &&
+    !rawFiles.every((file) => Boolean(getSplitGgufPart(file)))
+  ) {
     const orderedBySize = [...rawFiles].sort((a, b) => b.size - a.size)
     modelFiles = [orderedBySize[0]]
     projectorFiles = [orderedBySize[1]]
   }
 
   selectedProjectorFile.value = projectorFiles[0] ?? null
+  selectedModelFiles.value = modelFiles
   selectedImportFile.value = modelFiles[0] ?? null
   const modelFile = selectedImportFile.value
   if (modelFile) {
     importName.value = modelFile.name
     .replace(/\.gguf$/i, '')
+    .replace(/[-_.]\d{5}-of-\d{5}$/i, '')
     .replace(/[-_]+/g, ' ')
   } else {
     importName.value = ''
@@ -3391,6 +3612,7 @@ function openImportDialog() {
   importStatus.value = ''
   selectedFiles.value = []
   selectedImportFile.value = null
+  selectedModelFiles.value = []
   selectedProjectorFile.value = null
   selectedImageImportFiles.value = []
   importFileShas.value = {}
@@ -3399,6 +3621,7 @@ function openImportDialog() {
   importSha.value = ''
   importProjectorSha.value = ''
   importDetectedCapabilities.value = []
+  importFailureDetail.value = ''
   importDialogOpen.value = true
 }
 
@@ -3451,16 +3674,23 @@ async function nextImportStep() {
   }
 
   if (importStep.value === 0 && selectedImportFile.value) {
+    const splitError = validateSplitGgufFiles(selectedModelFiles.value)
+    if (splitError) {
+      ElMessage.error(splitError)
+      return
+    }
     validationRunning.value = true
     importStatus.value = '正在检查主要模型文件'
     try {
-      await verifyGgufFile(selectedImportFile.value)
-      importSha.value = await calculateFileSha256(
-        selectedImportFile.value,
-        (progress) => {
-          importStatus.value = `正在检查主要模型文件 · ${progress}%`
-        },
-      )
+      for (let index = 0; index < selectedModelFiles.value.length; index += 1) {
+        const modelFile = selectedModelFiles.value[index]
+        await verifyGgufFile(modelFile)
+        const sha = await calculateFileSha256(modelFile, (progress) => {
+          importStatus.value = `正在检查 ${modelFile.name} · ${index + 1}/${selectedModelFiles.value.length} · ${progress}%`
+        })
+        importFileShas.value[modelFile.name] = sha
+        if (index === 0) importSha.value = sha
+      }
       if (selectedProjectorFile.value) {
         await verifyGgufFile(selectedProjectorFile.value)
         importProjectorSha.value = await calculateFileSha256(
@@ -3586,7 +3816,13 @@ async function startImport() {
     return
   }
   const file = selectedImportFile.value
-  if (!file || !importSha.value) {
+  if (
+    !file ||
+    !importSha.value ||
+    selectedModelFiles.value.some(
+      (modelFile) => !importFileShas.value[modelFile.name],
+    )
+  ) {
     ElMessage.error('模型文件尚未完成校验')
     return
   }
@@ -3603,17 +3839,29 @@ async function startImport() {
   importRunning.value = true
   importProgress.value = 4
   importStatus.value = '正在准备模型文件'
+  importFailureDetail.value = ''
+  let stage: 'write' | 'create' | 'load' | 'capability' = 'write'
+  let modelCreated = false
 
   try {
-    const digest = await ensureOllamaBlob(file, importSha.value, (progress) => {
-      importProgress.value = 5 + Math.round(
-        progress * (selectedProjectorFile.value ? 0.42 : 0.65),
+    const modelFiles: Record<string, string> = {}
+    const mainUploadSpan = selectedProjectorFile.value ? 42 : 65
+    for (let index = 0; index < selectedModelFiles.value.length; index += 1) {
+      const modelFile = selectedModelFiles.value[index]
+      const digest = await ensureOllamaBlob(
+        modelFile,
+        importFileShas.value[modelFile.name],
+        (progress) => {
+          const completed = index + progress / 100
+          importProgress.value =
+            5 + Math.round((completed / selectedModelFiles.value.length) * mainUploadSpan)
+          importStatus.value =
+            progress < 100
+              ? `正在添加 ${modelFile.name} · ${progress}%`
+              : `${modelFile.name} 已准备好`
+        },
       )
-      importStatus.value =
-        progress < 100 ? `正在添加主要模型 · ${progress}%` : '主要模型已准备好'
-    })
-    const modelFiles: Record<string, string> = {
-      [file.name]: digest,
+      modelFiles[modelFile.name] = digest
     }
 
     if (selectedProjectorFile.value) {
@@ -3634,15 +3882,19 @@ async function startImport() {
 
     importProgress.value = 74
     importStatus.value = '正在完成模型安装'
+    stage = 'create'
     await createOllamaModel(modelName, modelFiles, (status) => {
       importStatus.value = status
       importProgress.value = Math.min(92, importProgress.value + 3)
     })
+    modelCreated = true
 
     importProgress.value = 94
     importStatus.value = '正在检查模型是否可以正常回答'
+    stage = 'load'
     await testOllamaModel(modelName)
     try {
+      stage = 'capability'
       const importedModel = await showOllamaModel(modelName)
       importDetectedCapabilities.value = importedModel.capabilities ?? []
       if (
@@ -3663,8 +3915,32 @@ async function startImport() {
     currentModelId.value = modelName
     importStep.value = 3
   } catch (error) {
-    importStatus.value = '导入失败'
-    ElMessage.error(getErrorMessage(error))
+    const rawMessage = getErrorMessage(error)
+    const lowerMessage = rawMessage.toLowerCase()
+    let guidance = rawMessage
+    if (error instanceof OllamaApiError && error.status === 403) {
+      guidance = '当前页面没有模型管理权限。请在安装 ShotAI 的 Ubuntu 主机上打开应用后导入。'
+    } else if (/unknown model architecture|unsupported architecture|not support/i.test(rawMessage)) {
+      guidance = `当前 AI 服务不支持这个模型架构。实际连接的 Ollama 版本是 ${ollamaVersion.value}；请更新离线运行组件，或改用推荐模型。原始信息：${rawMessage}`
+    } else if (/out of memory|cuda.*alloc|failed to allocate|memory allocation/i.test(lowerMessage)) {
+      guidance = `模型已经写入，但首次加载时显存或内存不足。请先把上下文设为 8K，关闭其他占用显卡的程序，或换用更小的 Q4_K_M 模型。原始信息：${rawMessage}`
+    } else if (/no space left|disk quota/i.test(lowerMessage)) {
+      guidance = `模型磁盘空间不足。请清理 ShotAI 数据目录后重试。原始信息：${rawMessage}`
+    } else if (/unexpected eof|digest mismatch|checksum|invalid.*gguf|failed to validate/i.test(lowerMessage)) {
+      guidance = `GGUF 文件不完整、损坏或配套文件版本不一致。请核对 SHA-256，并确保所有分片或 mmproj 来自同一模型版本。原始信息：${rawMessage}`
+    }
+    const stageLabel = {
+      write: '写入模型文件',
+      create: '创建模型清单',
+      load: '首次加载测试',
+      capability: '功能检查',
+    }[stage]
+    importFailureDetail.value = `${stageLabel}失败：${guidance}`
+    importStatus.value = modelCreated
+      ? `模型文件已安装，但${importFailureDetail.value}`
+      : importFailureDetail.value
+    ElMessage.error({ message: importStatus.value, duration: 0, showClose: true })
+    if (modelCreated) await refreshOllama()
   } finally {
     importRunning.value = false
   }
@@ -3794,6 +4070,20 @@ function applyDocumentTheme(enabled: boolean) {
   document.documentElement.classList.toggle('theme-light', !enabled)
 }
 
+let ambientMotionFrame = 0
+function handleAmbientPointer(event: PointerEvent) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  if (ambientMotionFrame) window.cancelAnimationFrame(ambientMotionFrame)
+  ambientMotionFrame = window.requestAnimationFrame(() => {
+    const root = document.querySelector('.shot-app') as HTMLElement | null
+    if (!root) return
+    const x = event.clientX / Math.max(1, window.innerWidth) - 0.5
+    const y = event.clientY / Math.max(1, window.innerHeight) - 0.5
+    root.style.setProperty('--ambient-x', `${(x * 24).toFixed(1)}px`)
+    root.style.setProperty('--ambient-y', `${(y * 18).toFixed(1)}px`)
+  })
+}
+
 watch(darkMode, applyDocumentTheme, { immediate: true })
 
 watch(sidebarCollapsed, (collapsed) => {
@@ -3801,6 +4091,13 @@ watch(sidebarCollapsed, (collapsed) => {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0')
   } catch {
     // Browsers with restricted storage can still use the control for this session.
+  }
+})
+
+watch(monitorDrawerOpen, (open) => {
+  if (!open && monitorTimer) {
+    window.clearInterval(monitorTimer)
+    monitorTimer = undefined
   }
 })
 
@@ -3818,6 +4115,7 @@ watch(
 
 onMounted(async () => {
   window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('pointermove', handleAmbientPointer, { passive: true })
   try {
     sidebarCollapsed.value =
       window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
@@ -3844,10 +4142,13 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('pointermove', handleAmbientPointer)
+  if (ambientMotionFrame) window.cancelAnimationFrame(ambientMotionFrame)
   chatController?.abort()
   imageController?.abort()
   if (imageProgressTimer) window.clearInterval(imageProgressTimer)
   if (healthTimer) window.clearInterval(healthTimer)
+  if (monitorTimer) window.clearInterval(monitorTimer)
   if (messageScrollFrame) window.cancelAnimationFrame(messageScrollFrame)
   if (persistenceTimer) window.clearTimeout(persistenceTimer)
   if (knowledgePersistenceTimer) {
@@ -3941,6 +4242,17 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="sidebar-footer">
+          <button
+            v-if="systemInfo.isHost"
+            class="settings-entry"
+            type="button"
+            aria-label="打开主机监控"
+            :title="sidebarCollapsed ? '主机监控' : undefined"
+            @click="switchView('monitor')"
+          >
+            <el-icon><Monitor /></el-icon>
+            <span class="sidebar-button-label">主机监控</span>
+          </button>
           <button
             class="settings-entry"
             type="button"
@@ -4781,7 +5093,7 @@ onBeforeUnmount(() => {
             <div class="image-model-install-icon">
               <el-icon><Picture /></el-icon>
             </div>
-            <span>Windows 本地图片创作</span>
+            <span>{{ hostPlatformLabel }} 本地图片创作</span>
             <h3>添加完整模型后即可使用</h3>
             <p>
               直接点击“添加模型”并选择下载页中的全部文件。系统会自动识别、组合并复用已有文件。
@@ -4931,7 +5243,7 @@ onBeforeUnmount(() => {
                 <span>
                   {{
                     selectedImageProvider?.kind === 'local-runtime'
-                      ? 'Windows 图片组件已连接。首次运行需要载入模型，可能等待几十秒。'
+                      ? `${hostPlatformLabel} 图片组件已连接。首次运行需要载入模型，可能等待几十秒。`
                       : '当前使用 Ollama 图片模型；图片仍只在本地生成。'
                   }}
                 </span>
@@ -6054,6 +6366,198 @@ onBeforeUnmount(() => {
         </div>
       </el-drawer>
 
+      <el-drawer
+        v-model="monitorDrawerOpen"
+        class="product-drawer monitor-drawer"
+        title="主机监控"
+        size="min(920px, 96vw)"
+        append-to-body
+        destroy-on-close
+      >
+        <template #header>
+          <div class="drawer-heading monitor-heading">
+            <div>
+              <h2>主机监控</h2>
+              <p>只在运行 ShotAI 的电脑上查看连接与运行状态</p>
+            </div>
+            <div v-if="monitorAuthenticated" class="monitor-heading-actions">
+              <span class="monitor-live"><i></i>实时更新</span>
+              <el-button text @click="signOutMonitor">
+                <el-icon><SwitchButton /></el-icon>
+                退出
+              </el-button>
+            </div>
+          </div>
+        </template>
+
+        <div v-if="!monitorAuthenticated" class="monitor-login-shell">
+          <section class="monitor-login-card" aria-labelledby="monitor-login-title">
+            <div class="monitor-login-mark" aria-hidden="true">
+              <el-icon><Lock /></el-icon>
+            </div>
+            <span class="monitor-kicker">HOST CONTROL</span>
+            <h3 id="monitor-login-title">管理员验证</h3>
+            <p>监控信息不会向局域网中的其他电脑开放。</p>
+            <form @submit.prevent="submitMonitorLogin">
+              <label>
+                <span>用户名</span>
+                <el-input
+                  v-model="monitorUsername"
+                  autocomplete="username"
+                  aria-label="管理员用户名"
+                >
+                  <template #prefix><el-icon><User /></el-icon></template>
+                </el-input>
+              </label>
+              <label>
+                <span>密码</span>
+                <el-input
+                  v-model="monitorPassword"
+                  :type="monitorPasswordVisible ? 'text' : 'password'"
+                  autocomplete="current-password"
+                  aria-label="管理员密码"
+                  @keydown.enter="submitMonitorLogin"
+                >
+                  <template #prefix><el-icon><Lock /></el-icon></template>
+                  <template #suffix>
+                    <button
+                      class="monitor-password-toggle"
+                      type="button"
+                      :aria-label="monitorPasswordVisible ? '隐藏密码' : '显示密码'"
+                      @click="monitorPasswordVisible = !monitorPasswordVisible"
+                    >
+                      <el-icon><Hide v-if="monitorPasswordVisible" /><View v-else /></el-icon>
+                    </button>
+                  </template>
+                </el-input>
+              </label>
+              <div v-if="monitorLoginError" class="monitor-login-error" role="alert">
+                {{ monitorLoginError }}
+              </div>
+              <el-button
+                class="monitor-login-button"
+                type="primary"
+                native-type="submit"
+                :loading="monitorLoginLoading"
+              >
+                进入监控平台
+              </el-button>
+            </form>
+          </section>
+        </div>
+
+        <div v-else-if="monitorSnapshot" class="monitor-dashboard">
+          <section class="monitor-overview">
+            <article class="monitor-hero-card">
+              <span class="monitor-card-label">当前在线</span>
+              <strong>{{ monitorSnapshot.onlineCount }}</strong>
+              <small>台设备在最近一分钟内访问</small>
+              <div class="monitor-orbit" aria-hidden="true"><i></i><i></i></div>
+            </article>
+            <article class="monitor-host-card">
+              <div>
+                <span class="monitor-card-label">运行主机</span>
+                <strong>{{ monitorSnapshot.host.name }}</strong>
+                <small>
+                  已运行 {{ formatMonitorDuration(monitorSnapshot.host.uptimeSeconds) }}
+                </small>
+              </div>
+              <span class="monitor-host-state"><i></i>正常</span>
+            </article>
+          </section>
+
+          <section class="monitor-metrics" aria-label="主机性能">
+            <article class="monitor-metric-card">
+              <div class="monitor-metric-heading">
+                <span>处理器</span><strong>{{ monitorSnapshot.performance.cpu.usagePercent.toFixed(0) }}%</strong>
+              </div>
+              <svg viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true">
+                <polyline :points="monitorChartPoints(monitorCpuHistory)" />
+              </svg>
+              <small>{{ monitorSnapshot.performance.cpu.cores }} 个运行核心</small>
+            </article>
+            <article class="monitor-metric-card">
+              <div class="monitor-metric-heading">
+                <span>内存</span><strong>{{ monitorSnapshot.performance.memory.usagePercent.toFixed(0) }}%</strong>
+              </div>
+              <svg viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true">
+                <polyline :points="monitorChartPoints(monitorMemoryHistory)" />
+              </svg>
+              <small>
+                {{ formatMonitorBytes(monitorSnapshot.performance.memory.usedBytes) }} /
+                {{ formatMonitorBytes(monitorSnapshot.performance.memory.totalBytes) }}
+              </small>
+            </article>
+            <article class="monitor-metric-card">
+              <div class="monitor-metric-heading">
+                <span>显卡</span>
+                <strong>
+                  {{ monitorSnapshot.performance.gpu ? `${monitorSnapshot.performance.gpu.usagePercent}%` : '—' }}
+                </strong>
+              </div>
+              <svg viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true">
+                <polyline :points="monitorChartPoints(monitorGpuHistory)" />
+              </svg>
+              <small v-if="monitorSnapshot.performance.gpu">
+                {{ monitorSnapshot.performance.gpu.name }} ·
+                {{ monitorSnapshot.performance.gpu.temperatureCelsius }}°C
+              </small>
+              <small v-else>没有读取到 NVIDIA 显卡状态</small>
+            </article>
+            <article class="monitor-metric-card">
+              <div class="monitor-metric-heading">
+                <span>磁盘</span>
+                <strong>
+                  {{ monitorSnapshot.performance.disk ? `${monitorSnapshot.performance.disk.usagePercent.toFixed(0)}%` : '—' }}
+                </strong>
+              </div>
+              <div class="monitor-disk-track" aria-hidden="true">
+                <span
+                  :style="{ transform: `scaleX(${(monitorSnapshot.performance.disk?.usagePercent || 0) / 100})` }"
+                ></span>
+              </div>
+              <small v-if="monitorSnapshot.performance.disk">
+                {{ formatMonitorBytes(monitorSnapshot.performance.disk.usedBytes) }} /
+                {{ formatMonitorBytes(monitorSnapshot.performance.disk.totalBytes) }}
+              </small>
+              <small v-else>暂时无法读取磁盘信息</small>
+            </article>
+          </section>
+
+          <section class="monitor-clients-card">
+            <div class="monitor-section-heading">
+              <div>
+                <span class="monitor-card-label">连接设备</span>
+                <h3>局域网访问记录</h3>
+              </div>
+              <label class="monitor-privacy-switch">
+                <span>隐藏 IP</span>
+                <el-switch v-model="monitorHideIps" aria-label="隐藏设备 IP" />
+              </label>
+            </div>
+            <div v-if="monitorSnapshot.clients.length" class="monitor-client-list">
+              <article v-for="client in monitorSnapshot.clients" :key="client.ip">
+                <span class="monitor-device-mark"><el-icon><Monitor /></el-icon></span>
+                <div>
+                  <strong>{{ client.host ? '本机工作台' : monitorClientLabel(client.userAgent) }}</strong>
+                  <small>{{ maskMonitorIp(client.ip) }}</small>
+                </div>
+                <span class="monitor-client-time">
+                  {{ new Date(client.lastSeen).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }}
+                </span>
+                <i class="monitor-client-online" aria-label="在线"></i>
+              </article>
+            </div>
+            <div v-else class="monitor-client-empty">暂时没有其他设备访问</div>
+          </section>
+        </div>
+
+        <div v-else class="monitor-loading" role="status">
+          <span></span>
+          正在读取主机状态
+        </div>
+      </el-drawer>
+
       <el-dialog
         v-model="importDialogOpen"
         class="import-dialog"
@@ -6089,7 +6593,7 @@ onBeforeUnmount(() => {
               action="#"
               accept=".gguf,.safetensors,.sft,.ckpt"
               :auto-upload="false"
-              :limit="6"
+              :limit="32"
               multiple
               :on-change="handleFileChange"
               :on-remove="handleFileChange"
@@ -6128,7 +6632,9 @@ onBeforeUnmount(() => {
                 <span>
                   {{ importMetadata.size }} ·
                   {{
-                    importMetadata.isVisionImport
+                    importMetadata.modelFileCount > 1
+                      ? `${importMetadata.modelFileCount} 个主要模型分片`
+                      : importMetadata.isVisionImport
                       ? '主要模型文件'
                       : importMetadata.isImageImport
                         ? `${importMetadata.fileCount} 个文件 · 自动组合`
@@ -6152,6 +6658,24 @@ onBeforeUnmount(() => {
                 <div>
                   <strong>{{ file.name }}</strong>
                   <span>{{ getImageImportFileRole(file) }} · {{ formatFileSize(file.size) }}</span>
+                </div>
+                <el-tag type="success" effect="plain">已经识别</el-tag>
+              </div>
+            </div>
+
+            <div
+              v-if="!importMetadata.isImageImport && importMetadata.modelFileCount > 1"
+              class="image-import-file-summary"
+            >
+              <div
+                v-for="file in selectedModelFiles"
+                :key="file.name"
+                class="file-summary projector-file-summary"
+              >
+                <div class="file-type">分片</div>
+                <div>
+                  <strong>{{ file.name }}</strong>
+                  <span>主要模型分片 · {{ formatFileSize(file.size) }}</span>
                 </div>
                 <el-tag type="success" effect="plain">已经识别</el-tag>
               </div>

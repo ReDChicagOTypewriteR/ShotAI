@@ -1,7 +1,11 @@
 {
   "host": "0.0.0.0",
   "port": 9090,
-  "version": "1.1.6",
+  "monitoring": {
+    "username": "admin",
+    "password": "alexjoker443477"
+  },
+  "version": "1.1.7",
   "allowLanAdministration": false,
   "ollamaUrl": "http://127.0.0.1:11434",
   "imageRuntime": {

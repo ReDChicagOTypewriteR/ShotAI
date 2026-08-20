@@ -1,8 +1,9 @@
 {
   "name": "shotai",
   "productName": "ShotAI",
+  "desktopName": "ShotAI",
   "private": true,
-  "version": "1.1.6",
+  "version": "1.1.7",
   "description": "ShotAI 本地与内网 AI 工作台",
   "author": "ShotAI",
   "main": "desktop/electron/main.cjs",
@@ -25,19 +26,27 @@
     "check:windows-launcher": "node scripts/check-windows-launcher.mjs",
     "check:windows-chat-ready": "node scripts/check-windows-chat-ready.mjs",
     "check:windows-image-runtime": "node scripts/check-windows-image-runtime.mjs",
+    "check:ubuntu-package": "node scripts/check-ubuntu-package.mjs",
+    "check:ubuntu-full": "node scripts/check-ubuntu-full-package.mjs",
     "check:electron": "node scripts/check-electron-client.mjs",
     "check:electron-full": "node scripts/check-electron-full-package.mjs",
     "check:model-files": "node scripts/check-model-file-reuse.mjs",
     "check:model-import": "node scripts/check-unified-model-import.mjs",
     "check:model-center": "node scripts/check-model-center-ui.mjs",
     "check:improvements": "node scripts/check-platform-improvements.mjs",
+    "check:monitor": "node scripts/check-monitor-platform.mjs",
     "check:lan-proxy": "node scripts/check-lan-proxy.mjs",
     "build": "vue-tsc -b && vite build",
     "electron:start": "electron .",
     "electron:dev": "npm run build && npm run check:electron && electron .",
     "electron:pack:win": "npm run build && npm run check:electron && electron-builder --win nsis --x64",
+    "electron:pack:win:chat": "npm run build && npm run check:electron && electron-builder --config desktop/electron/electron-builder.chat.cjs --win nsis --x64",
     "electron:pack:win:full": "npm run build && npm run check:electron && electron-builder --config desktop/electron/electron-builder.full.cjs --win nsis --x64 && npm run check:electron-full",
+    "electron:pack:ubuntu": "npm run build && npm run check:electron && npm run check:ubuntu-package && electron-builder --linux AppImage deb --x64",
+    "electron:pack:ubuntu:full": "npm run build && npm run check:electron && npm run check:ubuntu-package && npm run check:ubuntu-full && electron-builder --config desktop/electron/electron-builder.ubuntu-full.cjs --linux AppImage deb --x64",
     "build:win": "npm run electron:pack:win",
+    "build:ubuntu": "npm run electron:pack:ubuntu",
+    "build:ubuntu:full": "npm run electron:pack:ubuntu:full",
     "build:windows-launcher": "node scripts/build-windows-launcher.mjs",
     "preview": "vite preview",
     "serve:lan": "node scripts/serve-lan.mjs",
@@ -73,6 +82,7 @@
     "appId": "com.shotai.desktop",
     "productName": "ShotAI",
     "asar": true,
+    "compression": "maximum",
     "directories": {
       "output": "release/electron",
       "buildResources": "desktop/electron/assets"
@@ -109,6 +119,45 @@
       ],
       "artifactName": "ShotAI-${version}-Windows-${arch}-Setup.${ext}"
     },
+    "linux": {
+      "icon": "desktop/electron/assets/shotai.png",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Utility",
+      "maintainer": "ShotAI",
+      "vendor": "ShotAI",
+      "executableName": "shotai",
+      "syncDesktopName": true,
+      "synopsis": "局域网本地 AI 工作台",
+      "description": "在 Ubuntu 主机运行本地模型，并通过桌面窗口或局域网浏览器使用 ShotAI。",
+      "artifactName": "ShotAI-${version}-Ubuntu-22.04-x86_64.${ext}",
+      "desktop": {
+        "entry": {
+          "Name": "ShotAI",
+          "Comment": "局域网本地 AI 工作台",
+          "StartupWMClass": "ShotAI"
+        }
+      }
+    },
+    "deb": {
+      "packageCategory": "utils",
+      "priority": "optional",
+      "recommends": [
+        "libappindicator3-1"
+      ]
+    },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
@@ -116,6 +165,7 @@
       "createStartMenuShortcut": true,
       "shortcutName": "ShotAI",
       "runAfterFinish": true,
+      "differentialPackage": false,
       "deleteAppDataOnUninstall": false,
       "perMachine": true,
       "include": "desktop/electron/installer.nsh"

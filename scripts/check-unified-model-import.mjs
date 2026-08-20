@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { chromium } from 'playwright-core'
 
 const projectDirectory = resolve(import.meta.dirname, '..')
+const appUrl = process.env.SHOTAI_TEST_URL || 'http://127.0.0.1:5173'
 const builtHtml = readFileSync(resolve(projectDirectory, 'dist/index.html'), 'utf8')
 if (/import\.meta\.resolve/.test(builtHtml) || /type=["']module["']/.test(builtHtml)) {
   throw new Error('legacy-compatible build still contains the modern browser probe')
@@ -54,7 +55,7 @@ try {
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
   })
 
-  await page.goto('http://127.0.0.1:5173/', { waitUntil: 'networkidle' })
+  await page.goto(`${appUrl}/`, { waitUntil: 'networkidle' })
   await page.getByLabel('打开设置').click()
   await page.getByRole('button', { name: /日常对话/ }).click()
   const modelDrawer = page.getByRole('dialog', { name: '模型管理' })

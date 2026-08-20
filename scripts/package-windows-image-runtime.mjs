@@ -1,12 +1,16 @@
 import { copyFile, cp, mkdir, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readFile } from 'node:fs/promises'
 
 const projectDirectory = dirname(dirname(fileURLToPath(import.meta.url)))
+const packageJson = JSON.parse(
+  await readFile(join(projectDirectory, 'package.json'), 'utf8'),
+)
 const releaseDirectory = join(
   projectDirectory,
   'release',
-  'ShotAI-1.1.0-Optional-Image-Runtime-CUDA12',
+  `ShotAI-${packageJson.version}-Optional-Image-Runtime-CUDA12`,
 )
 
 await rm(releaseDirectory, { recursive: true, force: true })

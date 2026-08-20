@@ -97,6 +97,8 @@ git diff
 | 图片生成、参考图修改 | npm run check:image-generation |
 | 门户网站 | cd portal && npm run check:static && npm run build |
 | Electron 客户端 | npm run check:electron；完整安装包使用 npm run check:electron-full |
+| Ubuntu 安装包 | npm run check:ubuntu-package；发布包使用 npm run build:ubuntu |
+| Ubuntu 完整对话包 | npm run check:ubuntu-full；发布包使用 npm run build:ubuntu:full |
 | Windows 启动器 | npm run check:windows-launcher、npm run check:windows-chat-ready、npm run check:windows-image-runtime |
 
 所有前端改动至少执行：
@@ -202,6 +204,12 @@ npm run package:lan
 
 # Electron Windows 安装包
 npm run build:win
+
+# Electron Ubuntu 22.04 x86_64（DEB 与 AppImage）
+npm run build:ubuntu
+
+# 内置 Ollama 与 CUDA 运行库的 Ubuntu 完整对话离线版
+npm run build:ubuntu:full
 
 # 完整 Electron 包
 npm run electron:pack:win:full

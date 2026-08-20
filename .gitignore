@@ -33,3 +33,8 @@ release/
 vendor/**/*.dll
 vendor/**/*.exe
 vendor/**/*.zip
+vendor/**/*.so
+vendor/**/*.so.*
+vendor/**/bin/*
+vendor/**/llama-server
+vendor/**/llama-quantize

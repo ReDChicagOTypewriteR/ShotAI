@@ -9,6 +9,7 @@
 | [第一次使用指南](USER_GUIDE.md) | 普通使用者 | 启动、添加模型、对话、文件和图片 |
 | [内网部署与排错](LAN_DEPLOYMENT.md) | 主机管理员 | 9090 访问、局域网配置和常见问题 |
 | [Electron 客户端说明](ELECTRON_WINDOWS_GUIDE.md) | Windows 使用者 | 安装、数据目录、托盘和卸载 |
+| [Ubuntu 客户端说明](UBUNTU_GUIDE.md) | Ubuntu 使用者 | DEB、AppImage、Ollama、GPU 和内网配置 |
 
 ## 功能与方案
 
