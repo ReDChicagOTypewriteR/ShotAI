@@ -120,6 +120,7 @@ import {
   getShotAISystemInfo,
   loginMonitor,
   logoutMonitor,
+  writeModelImportFailureLog,
 } from './services/system'
 import type { MonitorSnapshot, ShotAISystemInfo } from './services/system'
 
@@ -192,6 +193,7 @@ interface DemoMessage {
 interface LocalModel {
   id: string
   name: string
+  fullName: string
   family: string
   capabilities: string[]
   parameters: string
@@ -457,6 +459,7 @@ const currentModelId = computed<string>({
 const emptyModel: LocalModel = {
   id: '',
   name: '正在查找可用模型',
+  fullName: '',
   family: '—',
   capabilities: [],
   parameters: '—',
@@ -862,7 +865,7 @@ function isImageGenerationMainFile(file: File) {
 
 function isImageVaeFile(file: File) {
   return (
-    /flux.?2.*vae|(?:^|[-_.])vae(?:[-_.]|$)|(?:^|[-_.])ae(?:[-_.]|$)/i.test(
+    /full.?encoder.?small.?decoder|flux.?2.*vae|(?:^|[-_.])vae(?:[-_.]|$)|(?:^|[-_.])ae(?:[-_.]|$)/i.test(
       file.name,
     ) || file.name.toLowerCase() === 'diffusion_pytorch_model.safetensors'
   )
@@ -1050,6 +1053,33 @@ function renderAnswerText(value: string) {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : '发生未知错误'
+}
+
+async function saveModelImportFailureLog(stage: string, error: unknown) {
+  const files =
+    importMode.value === 'image'
+      ? selectedImageImportFiles.value
+      : ([...selectedModelFiles.value, selectedProjectorFile.value].filter(
+          Boolean,
+        ) as File[])
+  try {
+    const result = await writeModelImportFailureLog({
+      mode: importMode.value,
+      stage,
+      modelName: importName.value,
+      error: getErrorMessage(error),
+      files: files.map((file) => ({ name: file.name, size: file.size })),
+    })
+    if (result.saved) {
+      ElMessage.info({
+        message: `失败原因已保存到桌面：${result.path}`,
+        duration: 8_000,
+        showClose: true,
+      })
+    }
+  } catch {
+    // Never hide the original import error when diagnostic logging is unavailable.
+  }
 }
 
 function getModelContextTokens(show?: OllamaShowResponse) {
@@ -1268,6 +1298,68 @@ function scheduleKnowledgeSave() {
   }, 400)
 }
 
+function formatModelDisplayName(rawName: string) {
+  const source = String(rawName || '')
+    .split('/')
+    .pop()!
+    .replace(/\.(?:gguf|safetensors)$/i, '')
+    .replace(/:[^:]+$/, '')
+    .trim()
+  const version = (value = '') => value.replace(/_/g, '.')
+
+  const qwen = source.match(/qwen[-_. ]?(\d+(?:[._]\d+)?)(?:[-_. ]?(vl|omni|coder|math))?/i)
+  if (qwen) {
+    const variant = qwen[2] ? ` ${qwen[2].toUpperCase()}` : ''
+    return `Qwen ${version(qwen[1])}${variant}`
+  }
+
+  const deepseek = source.match(/deepseek[-_. ]?(r\d+(?:[._]\d+)?|v\d+(?:[._]\d+)?|coder(?:[-_. ]?v?\d+(?:[._]\d+)?)?)/i)
+  if (deepseek) {
+    const release = version(deepseek[1])
+      .replace(/^r/i, 'R')
+      .replace(/^v/i, 'V')
+      .replace(/^coder/i, 'Coder')
+    return `DeepSeek ${release}`.trim()
+  }
+
+  const llama = source.match(/(?:meta[-_. ]*)?llama[-_. ]?(\d+(?:[._]\d+)?)/i)
+  if (llama) return `Llama ${version(llama[1])}`
+
+  const gemma = source.match(/gemma[-_. ]?(\d+(?:[._]\d+)?)/i)
+  if (gemma) return `Gemma ${version(gemma[1])}`
+
+  const phi = source.match(/phi[-_. ]?(\d+(?:[._]\d+)?)/i)
+  if (phi) return `Phi ${version(phi[1])}`
+
+  const minicpm = source.match(/minicpm[-_. ]?(v)?[-_. ]?(\d+(?:[._]\d+)?)/i)
+  if (minicpm) return `MiniCPM${minicpm[1] ? '-V' : ''} ${version(minicpm[2])}`
+
+  if (/z[-_. ]?image[-_. ]?turbo/i.test(source)) return 'Z-Image Turbo'
+
+  const flux = source.match(/flux[-_. ]?(\d+(?:[._]\d+)?)?(?:[-_. ]?(klein|dev|schnell))?/i)
+  if (flux) {
+    const release = flux[1] ? ` ${version(flux[1])}` : ''
+    const variant = flux[2]
+      ? ` ${flux[2].slice(0, 1).toUpperCase()}${flux[2].slice(1).toLowerCase()}`
+      : ''
+    return `FLUX${release}${variant}`
+  }
+
+  const mistral = source.match(/mistral(?:[-_. ]?(\d+(?:[._]\d+)?))?/i)
+  if (mistral) return `Mistral${mistral[1] ? ` ${version(mistral[1])}` : ''}`
+
+  const cleaned = source
+    .replace(/[-_. ]+\d+(?:\.\d+)?b(?=[-_. ]|$)/gi, '')
+    .replace(/[-_. ]+(?:instruct|chat|base|distill|thinking|reasoning)(?=[-_. ]|$)/gi, '')
+    .replace(/[-_. ]+q\d+(?:[-_.][a-z0-9]+)*(?=[-_. ]|$)/gi, '')
+    .replace(/[-_. ]+\d{5}-of-\d{5}$/i, '')
+    .replace(/[-_.]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return cleaned || source || '本地模型'
+}
+
 async function mapOllamaModel(
   model: OllamaModel,
   runningIds: Set<string>,
@@ -1287,7 +1379,8 @@ async function mapOllamaModel(
   return {
     model: {
       id: modelId,
-      name: model.name || modelId,
+      name: formatModelDisplayName(model.name || modelId),
+      fullName: model.name || modelId,
       family: show?.details.family || model.details.family || '未知',
       capabilities: show?.capabilities ?? [],
       parameters:
@@ -2126,6 +2219,7 @@ async function addMessageFiles(files: File[]) {
       ElMessage.success('参考图已添加，请描述想要的修改')
     } catch (error) {
       ElMessage.error(getErrorMessage(error))
+      await saveModelImportFailureLog('图片模型文件校验', error)
     } finally {
       attachmentProcessing.value = false
     }
@@ -3666,6 +3760,7 @@ async function nextImportStep() {
       importStep.value = 1
     } catch (error) {
       ElMessage.error(getErrorMessage(error))
+      await saveModelImportFailureLog('GGUF 文件校验', error)
     } finally {
       validationRunning.value = false
       importStatus.value = ''
@@ -3801,9 +3896,11 @@ async function startImageModelImport() {
     imageModelImportStatus.value = importStatus.value
     importStep.value = 3
   } catch (error) {
+    const failedStage = importStatus.value || '图片运行器启动与加载'
     importStatus.value = '导入失败'
     imageModelImportStatus.value = getErrorMessage(error)
     ElMessage.error(imageModelImportStatus.value)
+    await saveModelImportFailureLog(failedStage, error)
   } finally {
     importRunning.value = false
     imageModelImporting.value = false
@@ -3940,6 +4037,7 @@ async function startImport() {
       ? `模型文件已安装，但${importFailureDetail.value}`
       : importFailureDetail.value
     ElMessage.error({ message: importStatus.value, duration: 0, showClose: true })
+    await saveModelImportFailureLog(stageLabel, error)
     if (modelCreated) await refreshOllama()
   } finally {
     importRunning.value = false
@@ -5533,7 +5631,7 @@ onBeforeUnmount(() => {
                 <div class="model-symbol">{{ model.family.slice(0, 1) }}</div>
                 <div class="model-details">
                   <div class="model-title-line">
-                    <h3>{{ model.name }}</h3>
+                    <h3 :title="model.fullName">{{ model.name }}</h3>
                     <el-tag
                       v-if="isManagedModelSelected(model, section.key)"
                       type="success"
@@ -5602,7 +5700,7 @@ onBeforeUnmount(() => {
                     text
                     type="danger"
                     :disabled="isGenerating"
-                    :aria-label="`删除 ${model.name}`"
+                    :aria-label="`删除 ${model.fullName}`"
                     @click="removeModel(model)"
                   >
                     <el-icon><Delete /></el-icon>

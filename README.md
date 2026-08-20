@@ -10,7 +10,7 @@
 
 <p align="center">
   <img alt="Build verified" src="https://img.shields.io/badge/build-verified-2ea44f?style=flat&amp;logo=githubactions&amp;logoColor=white" />
-  <img alt="Version 1.1.7" src="https://img.shields.io/badge/version-v1.1.7-2496ed?style=flat" />
+  <img alt="Version 1.1.8" src="https://img.shields.io/badge/version-v1.1.8-2496ed?style=flat" />
   <img alt="Vue 3.5.40" src="https://img.shields.io/badge/Vue-3.5.40-42b883?style=flat&amp;logo=vuedotjs&amp;logoColor=white" />
   <img alt="Electron 43.2.0" src="https://img.shields.io/badge/Electron-43.2.0-47848f?style=flat&amp;logo=electron&amp;logoColor=white" />
   <img alt="TypeScript 5.9.3" src="https://img.shields.io/badge/TypeScript-5.9.3-3178c6?style=flat&amp;logo=typescript&amp;logoColor=white" />
@@ -134,7 +134,66 @@ ShotAI 会根据任务使用对应能力，不要求使用者频繁手动切换�
 
 相同的模型文件只保存一份，可以被多个功能共同使用。兼容范围和导入排错见 [内网部署说明](docs/LAN_DEPLOYMENT.md)。
 
-<p><sub>06 / DOCUMENTATION</sub></p>
+<p><sub>06 / MODEL COMPATIBILITY</sub></p>
+
+## 支持的模型与厂商
+
+ShotAI 不使用封闭的模型白名单。对话、图片理解和资料查找模型由内置 Ollama 运行，只要模型是 Ollama 当前版本可以读取的 GGUF，通常都可以通过“模型管理”导入。界面会把较长的文件名自动简化，例如 `qwen3.5-9b-instruct-q4_k_m:latest` 显示为 `Qwen 3.5`，实际调用仍保留完整模型名称。
+
+### 对话与推理模型
+
+| 厂商 / 组织 | 支持的代表系列 | 适合用途 | 导入方式 |
+| --- | --- | --- | --- |
+| 阿里云通义千问（Qwen） | Qwen 2.5、Qwen 3、Qwen 3.5、Qwen Coder、Qwen Math | 中文对话、办公写作、代码和数学 | 单个 GGUF |
+| DeepSeek | DeepSeek R1 Distill、DeepSeek Coder 等 Ollama 兼容版本 | 推理、代码和复杂分析 | 单个 GGUF；超大原版模型取决于主机资源 |
+| Meta | Llama 3、Llama 3.1、Llama 3.2 | 通用对话、多语言和英文任务 | 单个 GGUF |
+| Google | Gemma 2、Gemma 3 | 通用问答、轻量部署 | 单个 GGUF |
+| Mistral AI | Mistral、Mixtral、Mistral Nemo | 通用对话、多语言和长文本 | 单个 GGUF |
+| Microsoft | Phi 3、Phi 3.5、Phi 4 | 小型主机、快速问答和推理 | 单个 GGUF |
+| 零一万物（01.AI） | Yi、Yi 1.5 等 GGUF 版本 | 中文和双语对话 | 单个 GGUF |
+| 其他开放模型 | Ollama 能正常读取并返回对话能力的 GGUF | 根据模型说明决定 | 单个 GGUF，导入后自动检查 |
+
+### 图片理解模型
+
+| 厂商 / 组织 | 支持的代表系列 | 能力 | 导入方式 |
+| --- | --- | --- | --- |
+| 阿里云通义千问（Qwen） | Qwen2.5-VL、Qwen3-VL 的 Ollama / GGUF 版本 | 图片问答、截图、表格和文档页面理解 | 主模型 GGUF；部分版本需同页 `mmproj` |
+| Meta | Llama 3.2 Vision 的兼容版本 | 通用图片理解和描述 | 按模型下载页准备主模型及图片配套文件 |
+| OpenBMB / 面壁智能 | MiniCPM-V 的兼容 GGUF | 中文图片理解、OCR 和文档图片 | 主模型与同版本 `mmproj` 一起导入 |
+| LLaVA 社区 | LLaVA、LLaVA-NeXT 等 Ollama 兼容版本 | 通用图片理解 | 主模型与同版本 `mmproj` 一起导入 |
+
+选择两个视觉文件时可以一次拖入，ShotAI 会优先根据文件信息和名称识别主模型与 `mmproj`；无法确定时会提示重新选择同一下载页面、同一版本的配套文件。
+
+### 本地资料查找模型
+
+| 厂商 / 组织 | 支持的代表系列 | 用途 | 导入方式 |
+| --- | --- | --- | --- |
+| 阿里云通义千问（Qwen） | Qwen3 Embedding | 中文、多语言资料查找 | 单个 GGUF |
+| Nomic AI | Nomic Embed Text | 通用英文和多语言资料查找 | Ollama 兼容版本 |
+| 北京智源人工智能研究院（BAAI） | BGE、BGE-M3 的兼容版本 | 中文、多语言和长文档检索 | Ollama 兼容 GGUF |
+
+Embedding 模型不是必需项。没有安装时，知识库会自动使用普通关键词查找；安装后可以获得更准确的语义匹配。
+
+### 图片生成与修改模型
+
+| 厂商 / 组织 | 当前直接支持 | 能力 | 需要的文件 |
+| --- | --- | --- | --- |
+| Black Forest Labs | FLUX.2 Klein 4B / 9B GGUF | 文字生成图片、参考图生成和图片修改 | 图片主模型、Qwen 文本编码器、VAE |
+| 阿里通义实验室（Tongyi-MAI） | Z-Image Turbo GGUF | 快速文字生成图片、参考图修改 | 图片主模型、Qwen 文本编码器、VAE |
+| Stability AI | Stable Diffusion、SDXL、SD3 的兼容单文件版本 | 文字生成图片、以图生图 | 单个模型文件；具体能力取决于模型 |
+| 社区微调模型 | Juggernaut、DreamShaper 等兼容版本 | 写实、插画和风格化创作 | stable-diffusion.cpp 可以读取的单文件版本 |
+
+图片生成由本地 `stable-diffusion.cpp` 组件运行，不经过 Ollama。当前自动三文件组合重点支持 FLUX.2 Klein 和 Z-Image Turbo；文件名被修改得无法识别时，系统可能要求重新选择原始文件。
+
+### 当前需要注意
+
+- DeepSeek V4、完整 DeepSeek R1 等超大模型即使开放权重，也不代表普通桌面显卡可以流畅运行；实际能力取决于显存、内存和量化版本。
+- Qwen-Image-Max 是在线服务，不是可以下载到离线环境的模型，当前不能直接拖入 ShotAI。
+- Qwen-Image-2512、Qwen-Image-Edit-2511 等开放图片权重尚未接入当前的一键识别流程，不能按 FLUX.2 三文件方式直接使用。
+- 同一系列不同 GGUF 发布者的文件结构可能不同。建议从同一个 Hugging Face 下载页获取主模型与全部配套文件。
+- 模型授权由模型发布者决定。用于单位部署或商业场景前，请单独检查模型许可证。
+
+<p><sub>07 / DOCUMENTATION</sub></p>
 
 ## 文档
 
