@@ -89,7 +89,7 @@ try {
     timeout: 20_000,
   })
   await page.waitForFunction(
-    () => document.body.innerText.includes('qwen3-attachment-test'),
+    () => Boolean(document.querySelector('.model-select')?.textContent?.trim()),
     undefined,
     { timeout: 20_000 },
   )

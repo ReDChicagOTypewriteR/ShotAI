@@ -129,6 +129,7 @@ type ModelStatus = 'ready' | 'sleeping' | 'checking'
 type OllamaConnectionState = 'checking' | 'online' | 'degraded' | 'offline'
 type ImageCanvas = 'square' | 'landscape' | 'portrait'
 type ComposerMode = 'chat' | 'image'
+type ImageConversationIntent = 'chat' | 'generate' | 'edit'
 
 interface RagSource {
   id: string
@@ -188,6 +189,20 @@ interface DemoMessage {
   generationType?: 'chat' | 'image'
   generationProgress?: number
   generationStatus?: string
+  imagePrompt?: string
+  imageSourceId?: string
+}
+
+interface ImageConversationContext {
+  image: MessageImage
+  prompt: string
+  messageId: number
+}
+
+interface ImageIntentRoute {
+  intent: ImageConversationIntent
+  reference?: ImageConversationContext
+  strength?: number
 }
 
 interface LocalModel {
@@ -693,6 +708,118 @@ const selectedImageCanvas = computed(
     imageCanvasOptions.find((option) => option.id === imageCanvas.value) ??
     imageCanvasOptions[0],
 )
+
+const imageGenerationTerms =
+  /(?:生成|创建|创作|制作|设计|绘制|画|出)(?:一|1)?(?:张|幅|个)?[^。！？\n]{0,24}(?:图片|图像|照片|海报|插画|头像|壁纸|封面|logo|图标|画面|宣传图|效果图|漫画|场景|概念图)|(?:帮我|请|给我)[^。！？\n]{0,8}(?:画|绘制|出图)|(?:generate|create|draw|make|design)\s+(?:an?\s+)?(?:image|picture|photo|poster|illustration|logo|wallpaper)/i
+const imageEditTerms =
+  /(?:修改|优化|调整|润色|重做|重绘|改成|换成|替换|去掉|移除|删除|增加|添加|加一点|加些|减少|增强|调亮|调暗|换背景|改颜色|变成|变得|让(?:它|画面|图片)?.{0,8}更|保留构图|二次优化|继续优化|edit|modify|refine|retouch|change|replace|remove|add)/i
+const imageContextTerms =
+  /(?:这|那|上面|上一张|刚才|前面|原来|当前|现有|生成的|上传的)(?:一张|张|幅|个)?(?:图片|图像|照片|图|画面)|(?:this|that|previous|last)\s+(?:image|picture|photo)/i
+const imageExplanationTerms =
+  /^(?:如何|怎么|为什么|什么是|介绍|解释|说明|教程|哪些|哪个).{0,28}(?:生成|创作|制作|修改|编辑).{0,12}(?:图片|图像|照片|模型)/i
+
+function latestConversationImageContext(
+  conversation = activeConversationRecord.value,
+): ImageConversationContext | undefined {
+  if (!conversation) return undefined
+  for (let index = conversation.messages.length - 1; index >= 0; index -= 1) {
+    const message = conversation.messages[index]
+    if (!message.images?.[0]) continue
+    const previousUserPrompt = conversation.messages
+      .slice(0, index)
+      .reverse()
+      .find((item) => item.role === 'user')?.content
+    return {
+      image: message.images[0],
+      prompt:
+        message.imagePrompt ||
+        (message.role === 'user' ? message.content : previousUserPrompt) ||
+        '上一张图片',
+      messageId: message.id,
+    }
+  }
+  return undefined
+}
+
+function inferImageConversationIntent(
+  input: string,
+  hasPendingImage = pendingImages.value.length > 0,
+  previousImage = latestConversationImageContext(),
+): ImageIntentRoute {
+  const text = input.trim()
+  if (!text || imageExplanationTerms.test(text)) return { intent: 'chat' }
+
+  const explicitEdit = imageEditTerms.test(text)
+  const explicitContext = imageContextTerms.test(text)
+  const visualEditHint =
+    /(?:图片|图像|照片|画面|原图|构图|主体|背景|前景|人物|物体|风格|颜色|色调|蓝|红|绿|黄|紫|黑|白|亮|暗|光|影|清晰|模糊|自然)/.test(
+      text,
+    )
+  const followUpEdit =
+    Boolean(previousImage) &&
+    !/(?:代码|文本|回答|文档|方案|文章|内容|摘要)/.test(text) &&
+    /^(?:再|继续|然后|另外|同时|顺便|接着|还要|稍微|一点)/.test(text) &&
+    /(?:蓝|红|绿|黄|紫|黑|白|亮|暗|冷|暖|大|小|多|少|清晰|自然|细节|背景|主体|风格|颜色|光|影|加|减|改|换|去|优化)/.test(
+      text,
+    )
+  const similarImageRequest =
+    Boolean(previousImage) &&
+    !/(?:代码|文本|回答|文档|方案|文章|内容|摘要)/.test(text) &&
+    /(?:生成|制作|画|绘制|做).{0,10}(?:类似|相似|同款|同风格)|(?:照着|参考).{0,10}(?:生成|制作|画|绘制|做)/.test(
+      text,
+    )
+
+  if (
+    (explicitEdit &&
+      (hasPendingImage ||
+        explicitContext ||
+        (Boolean(previousImage) && visualEditHint))) ||
+    followUpEdit ||
+    similarImageRequest ||
+    (hasPendingImage && imageGenerationTerms.test(text))
+  ) {
+    const subtle = /(?:一点|一些|稍微|微调|轻微|自然些|继续优化|二次优化)/.test(text)
+    const extensive = /(?:完全|彻底|大幅|重做|重绘|全部|整体换成)/.test(text)
+    return {
+      intent: 'edit',
+      reference: previousImage,
+      strength: subtle ? 0.32 : extensive ? 0.72 : undefined,
+    }
+  }
+
+  if (imageGenerationTerms.test(text)) return { intent: 'generate' }
+  if (explicitEdit && explicitContext) {
+    return { intent: 'edit', reference: previousImage }
+  }
+  return { intent: 'chat' }
+}
+
+const composerImageIntent = computed(() => {
+  if (composerMode.value === 'image') {
+    return pendingImages.value.length ? 'edit' : 'generate'
+  }
+  return inferImageConversationIntent(senderText.value).intent
+})
+
+const composerIntentLabel = computed(() => {
+  if (composerImageIntent.value === 'generate') {
+    return selectedImageProvider.value
+      ? `将自动生成图片 · ${selectedImageProvider.value.label}`
+      : '识别为图片生成 · 尚未准备图片模型'
+  }
+  if (composerImageIntent.value === 'edit') {
+    const hasReference =
+      pendingImages.value.length > 0 || Boolean(latestConversationImageContext())
+    if (!hasReference) return '识别为图片修改 · 请先提供一张图片'
+    const provider = imageProviderOptions.value.find(
+      (item) => item.kind === 'local-runtime',
+    )
+    return provider
+      ? `将继续修改${pendingImages.value.length ? '上传的图片' : '上一张图片'} · ${provider.label}`
+      : '识别为图片修改 · 尚未准备本地图片模型'
+  }
+  return ''
+})
 
 const selectedKnowledgeBase = computed(() =>
   knowledgeBases.value.find(
@@ -2711,7 +2838,67 @@ function dataUrlSize(dataUrl: string) {
   return Math.max(0, Math.floor((payload.length * 3) / 4))
 }
 
-async function createImageInConversation() {
+function buildContextAwareImageEditPrompt(
+  instruction: string,
+  previousPrompt = '',
+) {
+  const base = previousPrompt.trim()
+  return [
+    '请保留参考图中未被明确要求改变的主体、构图、视角和整体风格。',
+    base && base !== '上一张生成的图片' ? `原始画面描述：${base}` : '',
+    `本次修改要求：${instruction}`,
+    '只执行本次要求，并让修改后的画面自然、完整、细节一致。',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+function appendImageIntentNotice(
+  prompt: string,
+  content: string,
+  referenceImage?: MessageImage,
+) {
+  const conversation = activeConversationRecord.value
+  if (!conversation) return
+  const isFirstUserMessage = conversation.messages.every(
+    (message) => message.role !== 'user',
+  )
+  conversation.messages.push({
+    id: ++messageId,
+    role: 'user',
+    placement: 'end',
+    variant: 'filled',
+    content: prompt,
+    time: nowTime(),
+    images: referenceImage ? [{ ...referenceImage }] : undefined,
+    generationType: 'image',
+  })
+  conversation.messages.push({
+    id: ++messageId,
+    role: 'assistant',
+    placement: 'start',
+    variant: 'borderless',
+    content,
+    time: nowTime(),
+    modelName: '图片任务路由',
+    generationType: 'image',
+    generationStatus: '需要准备',
+  })
+  if (isFirstUserMessage && conversation.label === '新的离线对话') {
+    conversation.label = `图片创作：${prompt}`.replace(/\s+/g, ' ').slice(0, 28)
+  }
+  conversation.updatedAt = Date.now()
+  senderText.value = ''
+  pendingImages.value = []
+  pendingAttachments.value = []
+  void nextTick(() => {
+    resizeComposer()
+    scrollMessagesToBottom(true)
+  })
+  scheduleWorkspaceSave()
+}
+
+async function createImageInConversation(route?: ImageIntentRoute) {
   const prompt = senderText.value.trim()
   if (!prompt) {
     ElMessage.warning('请先写下想要的画面')
@@ -2725,20 +2912,47 @@ async function createImageInConversation() {
     ElMessage.warning('图片修改一次只能使用一张参考图')
     return
   }
-  const referenceImage = pendingImages.value[0]
-  const provider = selectedImageProvider.value
-  if (!provider) {
-    ElMessage.warning('请先准备图片模型')
-    openImageStudio()
+  const inferredRoute =
+    route ??
+    ({
+      intent: pendingImages.value.length ? 'edit' : 'generate',
+    } satisfies ImageIntentRoute)
+  const attachedReference = pendingImages.value[0]
+  const contextReference = inferredRoute.reference
+  const referenceImage =
+    inferredRoute.intent === 'edit'
+      ? attachedReference || contextReference?.image
+      : undefined
+  if (inferredRoute.intent === 'edit' && !referenceImage) {
+    appendImageIntentNotice(
+      prompt,
+      '我识别到你想继续修改图片，但当前对话里还没有可用的上一张图片。请先上传一张参考图，或者先让我生成一张图片，再直接说“再加一点蓝色”之类的修改要求。',
+    )
     return
   }
-  if (referenceImage && provider.kind !== 'local-runtime') {
-    ElMessage.warning('图片修改需要使用本地图片组件，请在图片设置中选择本地模型')
-    openImageStudio()
+  const provider = referenceImage
+    ? imageProviderOptions.value.find(
+        (item) => item.kind === 'local-runtime',
+      )
+    : selectedImageProvider.value
+  if (!provider) {
+    appendImageIntentNotice(
+      prompt,
+      referenceImage
+        ? '我识别到这是图片修改任务，但这台主机还没有准备本地图片生成模型和运行组件。准备完成后，可以直接在对话里继续修改，不需要切换模式。'
+        : '我识别到这是图片生成任务，但这台主机还没有准备图片生成模型和运行组件。请让管理员先在模型管理中添加图片模型。',
+      attachedReference,
+    )
     return
   }
   const conversation = activeConversationRecord.value
   if (!conversation || imageGenerating.value || isGenerating.value) return
+
+  const runtimePrompt = referenceImage
+    ? buildContextAwareImageEditPrompt(prompt, contextReference?.prompt)
+    : prompt
+  const editStrength =
+    inferredRoute.strength ?? imageEditStrength.value
 
   const isFirstUserMessage = conversation.messages.every(
     (message) => message.role !== 'user',
@@ -2750,7 +2964,7 @@ async function createImageInConversation() {
     variant: 'filled',
     content: prompt,
     time: nowTime(),
-    images: referenceImage ? [{ ...referenceImage }] : undefined,
+    images: attachedReference ? [{ ...attachedReference }] : undefined,
     generationType: 'image',
   })
   if (isFirstUserMessage && conversation.label === '新的离线对话') {
@@ -2767,11 +2981,17 @@ async function createImageInConversation() {
     modelName: provider.label,
     generationType: 'image',
     generationProgress: 2,
-    generationStatus: '正在准备图片模型',
+    generationStatus: referenceImage
+      ? '已识别为图片修改 · 正在准备本地模型'
+      : '已识别为图片生成 · 正在准备本地模型',
+    imagePrompt: runtimePrompt,
+    imageSourceId: referenceImage?.id,
   })
   conversation.messages = [...conversation.messages, assistantMessage]
   conversation.updatedAt = Date.now()
   senderText.value = ''
+  pendingImages.value = []
+  pendingAttachments.value = []
   void nextTick(resizeComposer)
   isGenerating.value = true
   isStopping.value = false
@@ -2786,7 +3006,7 @@ async function createImageInConversation() {
   try {
     const canvas = selectedImageCanvas.value
     const result = await requestGeneratedImage(
-      prompt,
+      runtimePrompt,
       provider,
       canvas,
       controller.signal,
@@ -2798,7 +3018,7 @@ async function createImageInConversation() {
         if (isMessageScrollerNearBottom()) scrollMessagesToBottom()
       },
       referenceImage
-        ? { source: referenceImage, strength: imageEditStrength.value }
+        ? { source: referenceImage, strength: editStrength }
         : undefined,
     )
     const generatedImage: MessageImage = {
@@ -2812,10 +3032,12 @@ async function createImageInConversation() {
     }
     assistantMessage.images = [generatedImage]
     assistantMessage.content = referenceImage
-      ? '图片已根据参考图和你的描述在本地修改。'
-      : '图片已根据你的描述在本地生成。'
+      ? contextReference && !attachedReference
+        ? '已根据上一张图片和你的新要求继续修改。你可以接着说“再亮一点”或“换成蓝色背景”。'
+        : '图片已根据参考图和你的描述在本地修改。你可以继续用一句话调整它。'
+      : '图片已根据你的描述在本地生成。你可以直接继续说“再优化一下”或提出具体修改。'
     assistantMessage.generationProgress = 100
-    assistantMessage.generationStatus = '图片已生成'
+    assistantMessage.generationStatus = referenceImage ? '图片已修改' : '图片已生成'
     generatedImageUrl.value = result.dataUrl
     generatedImageModel.value = provider.label
     await rememberGeneratedImage(
@@ -2832,8 +3054,8 @@ async function createImageInConversation() {
       return
     }
     const message = getImageGenerationError(error)
-    assistantMessage.content = `图片生成失败：${message}`
-    assistantMessage.generationStatus = '生成失败'
+    assistantMessage.content = `${referenceImage ? '图片修改' : '图片生成'}失败：${message}`
+    assistantMessage.generationStatus = referenceImage ? '修改失败' : '生成失败'
     ElMessage.error(message)
   } finally {
     if (imageProgressTimer) {
@@ -3573,6 +3795,18 @@ async function handleSubmit() {
   }))
   if (!input && !submittedImages.length && !submittedAttachments.length) {
     ElMessage.warning('请输入问题或添加附件后再发送')
+    return
+  }
+  const imageRoute = inferImageConversationIntent(
+    input,
+    submittedImages.length > 0,
+  )
+  if (imageRoute.intent !== 'chat') {
+    if (submittedAttachments.length) {
+      ElMessage.warning('图片生成和修改暂时不能同时读取文档，请先移除文档附件')
+      return
+    }
+    await createImageInConversation(imageRoute)
     return
   }
   if (!ensureChatReady()) return
@@ -5167,6 +5401,34 @@ onBeforeUnmount(() => {
                 添加参考图进行修改
               </button>
             </div>
+            <div
+              v-else-if="senderText.trim() && composerImageIntent !== 'chat'"
+              class="composer-auto-route"
+              :class="{
+                'is-warning':
+                  (composerImageIntent === 'generate' && !selectedImageProvider) ||
+                  (composerImageIntent === 'edit' &&
+                    !imageProviderOptions.some(
+                      (provider) => provider.kind === 'local-runtime',
+                    )),
+              }"
+              role="status"
+              aria-live="polite"
+            >
+              <span class="composer-auto-route-icon" aria-hidden="true">
+                <el-icon><MagicStick /></el-icon>
+              </span>
+              <div>
+                <strong>{{ composerIntentLabel }}</strong>
+                <small>
+                  {{
+                    composerImageIntent === 'edit'
+                      ? '发送后会保留未要求改变的内容，并基于上下文继续修改'
+                      : '发送后会直接调用本地图片模型，不会占用聊天模型'
+                  }}
+                </small>
+              </div>
+            </div>
             <div class="composer-input">
               <div class="sender-prefix-actions">
                 <el-dropdown
@@ -5222,7 +5484,7 @@ onBeforeUnmount(() => {
                     ? pendingImages.length
                       ? '描述想怎样修改这张图，按 Enter 开始'
                       : '描述想要的画面，按 Enter 开始生成'
-                    : '输入问题，按 Enter 发送，Shift + Enter 换行'
+                    : '输入问题，或直接说“帮我生成一张图片”'
                 "
                 @input="resizeComposer"
                 @keydown="handleComposerKeydown"
@@ -5237,6 +5499,10 @@ onBeforeUnmount(() => {
                         : '停止生成（Esc）'
                       : composerMode === 'image'
                         ? '生成图片（Enter）'
+                        : composerImageIntent === 'edit'
+                          ? '继续修改图片（Enter）'
+                          : composerImageIntent === 'generate'
+                            ? '生成图片（Enter）'
                         : '发送消息（Enter）'
                   "
                   placement="top"
