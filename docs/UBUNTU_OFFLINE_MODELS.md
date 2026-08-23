@@ -32,6 +32,23 @@
 
 当前公开 Linux 预编译包以 Ubuntu 24.04 为目标，不能直接承诺兼容 Ubuntu 22.04。应在 Ubuntu 22.04 x86_64 联网构建机上编译 CUDA 版 `sd-server`，再连同所需动态库放入 ShotAI 的 `runtime/image`。只有模型文件、没有这个运行器时，图片生成不会启动。
 
+### 更高质量的推荐：FLUX.2 Klein 9B
+
+双 V100 32GB 主机需要比 4B 更好的画面质量时，推荐使用 FLUX.2 Klein 9B 的
+量化组合。它把文字生成、单图修改和多参考图能力放在同一架构中；ShotAI 会根据
+文件名自动识别 9B 主模型、Qwen3 8B 文字理解文件和 FLUX.2 图片处理文件。
+
+| 角色 | 推荐下载 |
+| --- | --- |
+| 图片主模型 | [FLUX.2 Klein 9B GGUF](https://huggingface.co/leejet/FLUX.2-klein-9B-GGUF/tree/main) 中的 `flux-2-klein-9b-Q4_0.gguf` |
+| 文字理解 | [Qwen3-8B GGUF](https://huggingface.co/unsloth/Qwen3-8B-GGUF/tree/main) 中名称包含 `8B` 的 Q4 量化文件 |
+| 图片编码/解码 | [FLUX.2 small decoder](https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/tree/main) 中的 `full_encoder_small_decoder.safetensors` |
+
+把三个文件一次性加入 ShotAI。优先从 1024×1024、4 步开始；如果单卡显存不足，
+让 Ubuntu 22.04 编译的 `sd-server` 启用 CPU offload。9B 官方权重使用 FLUX
+Non-Commercial License，只适合非商业测试；商业部署应继续使用 Apache 2.0 的
+FLUX.2 Klein 4B，或另行取得 9B 商业授权。
+
 ## 完全离线时的准备方式
 
 推荐在一台能联网的 Linux x86_64 电脑上，用与服务器相同版本的 Ollama 下载官方模型，然后整体搬运模型仓库。这样会保留清单、模板、视觉配套文件和校验信息，比单独搬运第三方 GGUF 更可靠。
