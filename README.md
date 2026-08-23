@@ -39,6 +39,7 @@
 
 <p align="center">
   <a href="http://alexjoker.top/projects/ShotAI/">产品介绍</a> ·
+  <a href="https://github.com/ReDChicagOTypewriteR/ShotAI/releases/tag/v1.1.9-ubuntu">Ubuntu 版下载</a> ·
   <a href="docs/USER_GUIDE.md">使用指南</a> ·
   <a href="docs/LAN_DEPLOYMENT.md">内网部署</a> ·
   <a href="docs/README.md">全部文档</a>
@@ -54,13 +55,15 @@
 
 <p><sub>01 / RELEASE HIGHLIGHTS</sub></p>
 
-## 1.1.7 · 更像一套完整的本地 AI 平台
+## 1.1.9 · Ubuntu 22.04 完整离线版
 
-| 全新工作台 | 主机监控 | 更轻的安装方式 |
+| 独立 Ollama 环境 | Tesla V100 / CUDA 12 | 可追踪的导入与运行日志 |
 | --- | --- | --- |
-| Apple × SpaceX 视觉语言，加入毛玻璃、圆角、柔和阴影与自然过渡 | 仅运行 ShotAI 的主机可进入，查看在线设备、CPU、内存、磁盘与 NVIDIA 显卡状态 | Windows 聊天标准版约 806MB；图片生成组件可按需添加；仍提供完整离线版 |
+| 内置 Ollama 使用独立端口和模型目录，不再读取主机上原有 Ollama 的模型列表 | Ubuntu 上优先使用 `cuda_v12`；监控以实际显存和卸载层数区分 GPU 推理与 CPU 回退 | 安装目录、AppImage 旁和桌面均可留下启动、运行及模型导入失败记录 |
 
-主机监控带独立管理员登录、IP 隐藏和登录失败限制；局域网普通使用者无法访问监控接口。默认登录信息保存在 `lan.config.json`，正式部署前请修改管理员密码。
+本次提供 Ubuntu 22.04 x86_64 的 DEB 与 AppImage。完整包内置 Ollama 和 CUDA
+运行库，但不包含模型权重、NVIDIA 驱动及 Ubuntu 图片生成运行器。下载、安装、
+离线模型迁移和排错见 [Ubuntu 版本说明](README_UBUNTU.md)。
 
 <p><sub>02 / OVERVIEW</sub></p>
 
@@ -98,6 +101,17 @@ ShotAI 把本地模型、文件、资料库和图片能力放进同一个网页�
 3. 将界面显示的 `http://主机IP:9090` 发给局域网使用者。
 
 模型不会随源码仓库提供。第一次部署请先阅读 [使用指南](docs/USER_GUIDE.md) 和 [内网部署说明](docs/LAN_DEPLOYMENT.md)。
+
+### Ubuntu 22.04 完整离线版
+
+| 文件 | 推荐场景 |
+| --- | --- |
+| `ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb` | 推荐安装方式，可从应用程序菜单启动 |
+| `ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.AppImage` | 免安装运行、权限受限环境和故障排查 |
+
+安装包可从 [GitHub Release v1.1.9 Ubuntu](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/tag/v1.1.9-ubuntu)
+下载。完全离线安装、SHA-256 校验、V100 验证和日志位置见
+[README_UBUNTU.md](README_UBUNTU.md)。
 
 ### Windows 安装包怎么选
 
@@ -222,4 +236,5 @@ Embedding 模型不是必需项。没有安装时，知识库会自动使用普�
 
 ShotAI 负责模型管理、交互体验、文件处理和局域网共享；Ollama 与本地图片组件负责实际计算。项目不会把模型权重、大型运行组件或历史安装包提交到源码仓库。
 
-完整变更见 [CHANGELOG.md](CHANGELOG.md)。仓库当前尚未提供项目许可证，在添加 `LICENSE` 前，请勿默认复制、修改或重新分发项目内容。
+完整变更见 [CHANGELOG.md](CHANGELOG.md)。项目许可见 [LICENSE](LICENSE)。模型、Ollama
+及其他第三方运行组件仍分别受各自许可证约束。
