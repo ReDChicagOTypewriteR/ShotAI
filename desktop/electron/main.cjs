@@ -323,16 +323,19 @@ async function startOllama() {
   const output = openProcessLog('ollama.log')
   try {
     cleanupInterruptedOllamaCopies(shotAIModelDirectory)
-    const preferredComputeLibrary =
-      process.platform === 'linux' && isBundledOllama
-        ? bundledCudaLibrary(executable, 'cuda_v12')
-        : ''
+    const preferredComputeLibrary = isBundledOllama
+      ? bundledCudaLibrary(executable, 'cuda_v12')
+      : ''
     Object.assign(ollamaRuntimeState, {
       computeLibrary: preferredComputeLibrary,
       offline: isBundledOllama,
     })
     if (preferredComputeLibrary) {
-      log('Ubuntu 离线包已固定使用 CUDA 12 运行库，以兼容 Tesla V100（Compute Capability 7.0）。')
+      log(
+        process.platform === 'linux'
+          ? 'Ubuntu 离线包已固定使用 CUDA 12 运行库，以兼容 Tesla V100（Compute Capability 7.0）。'
+          : 'Windows 完整包已固定使用内置 CUDA 12 运行库。',
+      )
     }
     const child = spawn(executable, ['serve'], {
       cwd: existsSync(executable) ? dirname(executable) : undefined,

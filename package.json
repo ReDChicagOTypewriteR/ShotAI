@@ -41,7 +41,7 @@
     "electron:dev": "npm run build && npm run check:electron && electron .",
     "electron:pack:win": "npm run build && npm run check:electron && electron-builder --config desktop/electron/electron-builder.windows.cjs --win nsis --x64",
     "electron:pack:win:chat": "npm run build && npm run check:electron && electron-builder --config desktop/electron/electron-builder.chat.cjs --win nsis --x64",
-    "electron:pack:win:full": "npm run build && npm run check:electron && electron-builder --config desktop/electron/electron-builder.full.cjs --win nsis --x64 && npm run check:electron-full",
+    "electron:pack:win:full": "npm run build && npm run check:electron && electron-builder --config desktop/electron/electron-builder.windows.cjs --win nsis --x64 && npm run check:electron-full",
     "electron:pack:ubuntu": "npm run build && npm run check:electron && npm run check:ubuntu-package && electron-builder --config desktop/electron/electron-builder.ubuntu.cjs --linux AppImage deb --x64",
     "electron:pack:ubuntu:full": "npm run build && npm run check:electron && npm run check:ubuntu-package && npm run check:ubuntu-full && electron-builder --config desktop/electron/electron-builder.ubuntu-full.cjs --linux AppImage deb --x64",
     "build:win": "npm run electron:pack:win",
