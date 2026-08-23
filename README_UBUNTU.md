@@ -1,4 +1,4 @@
-# ShotAI 1.1.9 · Ubuntu 22.04 完整离线版
+# ShotAI 1.2.0 · Ubuntu 22.04 完整离线版
 
 本版本面向 Ubuntu 22.04 LTS x86_64，可在完全离线环境运行 ShotAI、Ollama
 文字/视觉模型、资料库、文件问答、局域网共享和主机监控。已针对 NVIDIA Tesla
@@ -6,8 +6,7 @@ V100 与 CUDA 12 路径进行适配。
 
 ## 下载
 
-- [DEB 安装包](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.1.9-ubuntu/ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb)
-- [AppImage 免安装版](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.1.9-ubuntu/ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.AppImage)
+- [DEB 安装包](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.2.0/ShotAI-1.2.0-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb)
 
 安装包包含 ShotAI、Ollama v0.32.14，以及 CUDA 12/13、CPU 和 Vulkan 运行库；
 不包含模型权重、NVIDIA 驱动或图片生成用的 Linux `sd-server`。
@@ -17,23 +16,15 @@ V100 与 CUDA 12 路径进行适配。
 推荐使用 DEB。若双击后进入压缩包或没有反应，请打开安装包所在目录的终端：
 
 ```bash
-sudo dpkg -i ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb
+sudo dpkg -i ShotAI-1.2.0-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb
 shotai
 ```
 
-AppImage 不写入系统安装目录：
-
-```bash
-chmod +x ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.AppImage
-./ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.AppImage
-```
-
-如果 AppImage 报告缺少 FUSE，而离线系统没有 `libfuse2` 安装包，请直接使用
-DEB 版本。
+1.2.0 正式发布提供 DEB，避免完全离线环境因为缺少 FUSE 而出现 AppImage 双击无反应。
 
 ## 模型与主机上原有的 Ollama
 
-1.1.9 完整版不连接主机上已经运行的 `127.0.0.1:11434`。ShotAI 会在
+1.2.0 完整版不连接主机上已经运行的 `127.0.0.1:11434`。ShotAI 会在
 `11435–11454` 中选择空闲端口，并固定使用以下独立模型目录：
 
 ```text
@@ -70,18 +61,19 @@ ShotAI 默认监听 `0.0.0.0:9090`：
 ## 日志与导入失败排查
 
 - DEB：`/opt/ShotAI/logs/`；
-- AppImage：AppImage 文件旁的 `ShotAI-logs/`；
 - 目录不可写时：Ubuntu 桌面的 `ShotAI-logs/`；
 - 模型导入失败：Ubuntu 桌面的 `ShotAI-model-import.log`。
 
-大于 8GB 的模型转换可能持续较长时间。导入期间不要退出；若进程意外中断，
-1.1.9 会在下次启动时清理残留的 `COPY...` 临时文件。
+1.2.0 导入聊天模型时不再预先完整扫描大文件，而是在一次写入过程中同步完成
+SHA-256 校验。导入期间不要退出；若进程意外中断，下次启动时会清理残留临时文件。
+
+默认最多接收五位活跃用户：两路同时推理、三路等待，第六路请求会提示稍后重试。
+当前聊天模型基线为 Qwen3.5，不把 DeepSeek-R1 当作正在使用的默认模型。
 
 ## SHA-256
 
 ```text
-d37c76bfa0f9c8b194cb42d2b5d04198fda6f484a60d6ab3f2c00e60a9cfc0f1  ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.AppImage
-00c0d21ce798ba026c83093af895ed74aed439d3427bcdeacd3d162f91c8c91f  ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb
+6e2c069fc3f51c8f801bcd7dc5c85c4e44b9cc3b10f218cb0cfb22a9fb2fea27  ShotAI-1.2.0-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb
 ```
 
 完整安装、模型迁移与 Ubuntu 22.04 图片生成限制见
