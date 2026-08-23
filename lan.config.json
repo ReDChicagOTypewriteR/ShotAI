@@ -5,12 +5,16 @@
     "username": "admin",
     "password": "alexjoker443477"
   },
-  "version": "1.1.9",
+  "version": "1.2.0",
   "allowLanAdministration": false,
   "ollamaUrl": "http://127.0.0.1:11434",
+  "concurrency": {
+    "maxActiveUsers": 5,
+    "maxParallelInferences": 2
+  },
   "imageRuntime": {
     "url": "http://127.0.0.1:1234",
-    "modelLabel": "FLUX.2 Klein 4B",
+    "modelLabel": "FLUX.2 Klein 9B",
     "mode": "auto",
     "model": "",
     "diffusionModel": "",

@@ -46,6 +46,13 @@ try {
         isHost: true,
         canManage: true,
         port: 9090,
+        ollama: {
+          source: 'embedded',
+          endpoint: 'http://127.0.0.1:11435',
+          modelDirectory: 'ShotAI 独立模型目录',
+          isolated: true,
+          systemOllamaDetected: false,
+        },
       }),
     }),
   )

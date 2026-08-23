@@ -507,6 +507,61 @@ export async function ensureOllamaBlob(
   return digest
 }
 
+export interface ImportedModelBlob {
+  digest: string
+  sha256: string
+  reused: boolean
+  fastPath: boolean
+}
+
+export function importOllamaModelFile(
+  file: File,
+  onProgress?: (percentage: number) => void,
+  onRegistering?: () => void,
+) {
+  return new Promise<ImportedModelBlob>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open(
+      'PUT',
+      `/shotai/model-import/files/${encodeURIComponent(file.name)}`,
+    )
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) {
+        onProgress?.(Math.round((event.loaded / event.total) * 100))
+      }
+    })
+    xhr.upload.addEventListener('load', () => onRegistering?.())
+    xhr.addEventListener('load', () => {
+      let body: Partial<ImportedModelBlob> & { error?: string } = {}
+      try {
+        body = JSON.parse(xhr.responseText || '{}')
+      } catch {
+        // A plain-text response is handled by the fallback message below.
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && body.digest && body.sha256) {
+        resolve({
+          digest: body.digest,
+          sha256: body.sha256,
+          reused: Boolean(body.reused),
+          fastPath: Boolean(body.fastPath),
+        })
+        return
+      }
+      reject(
+        new OllamaApiError(
+          body.error || xhr.responseText || `模型数据写入失败（HTTP ${xhr.status}）`,
+          xhr.status,
+        ),
+      )
+    })
+    xhr.addEventListener('error', () => {
+      reject(new OllamaApiError('模型文件没有添加成功，请重新启动 ShotAI 后再试'))
+    })
+    xhr.send(file)
+  })
+}
+
 export async function createOllamaModel(
   model: string,
   files: Record<string, string>,

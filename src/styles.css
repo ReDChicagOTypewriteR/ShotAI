@@ -4771,6 +4771,63 @@ button {
   border-radius: 14px;
 }
 
+.composer-auto-route {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 6px;
+  padding: 9px 12px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--success) 8%, var(--composer));
+  border: 1px solid color-mix(in srgb, var(--success) 36%, var(--border));
+  border-radius: 14px;
+}
+
+.composer-auto-route.is-warning {
+  background: color-mix(in srgb, var(--warning) 8%, var(--composer));
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
+}
+
+.composer-auto-route-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  color: var(--bg);
+  background: var(--success);
+  border-radius: 10px;
+}
+
+.composer-auto-route.is-warning .composer-auto-route-icon {
+  background: var(--warning);
+}
+
+.composer-auto-route > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.composer-auto-route strong,
+.composer-auto-route small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-auto-route strong {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.composer-auto-route small {
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
 .composer-mode-title {
   display: flex;
   min-width: 0;
@@ -5661,6 +5718,7 @@ button {
 
 .image-attachment-tray,
 .composer-mode-strip,
+.composer-auto-route,
 .privacy-strip {
   background: color-mix(in srgb, var(--surface) 86%, transparent);
   border-color: var(--border);

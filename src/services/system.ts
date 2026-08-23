@@ -18,6 +18,17 @@ export interface ShotAISystemInfo {
   logs: {
     directory: string
   }
+  concurrency: InferenceConcurrency
+}
+
+export interface InferenceConcurrency {
+  maxActiveUsers: number
+  maxParallelInferences: number
+  running: number
+  queued: number
+  available: number
+  rejected: number
+  averageWaitMs: number
 }
 
 export interface ModelCacheCleanupResult {
@@ -92,6 +103,7 @@ export interface MonitorSnapshot {
       transferredBytes: number
       totalBytes: number
     }
+    concurrency: InferenceConcurrency
     process: { memoryBytes: number; requestCount: number }
   }
 }
@@ -172,6 +184,15 @@ const fallbackInfo: ShotAISystemInfo = {
   },
   logs: {
     directory: 'data/logs',
+  },
+  concurrency: {
+    maxActiveUsers: 5,
+    maxParallelInferences: 2,
+    running: 0,
+    queued: 0,
+    available: 5,
+    rejected: 0,
+    averageWaitMs: 0,
   },
 }
 

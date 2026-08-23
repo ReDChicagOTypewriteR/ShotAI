@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { createServer } from 'node:http'
+import { cp, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -9,6 +11,18 @@ const testDirectory = await mkdtemp(join(tmpdir(), 'shotai-v1-server-'))
 const port = 19090 + Math.floor(Math.random() * 500)
 const modelImportLogPath = join(testDirectory, 'Desktop', 'ShotAI-model-import.log')
 let server
+let ollamaServer
+let activeInference = 0
+let maximumObservedInference = 0
+
+function createTestGguf() {
+  const buffer = Buffer.alloc(64)
+  buffer.write('GGUF', 0, 'ascii')
+  buffer.writeUInt32LE(3, 4)
+  buffer.writeBigUInt64LE(1n, 8)
+  buffer.writeBigUInt64LE(1n, 16)
+  return buffer
+}
 
 async function waitForServer() {
   for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -24,6 +38,34 @@ async function waitForServer() {
 }
 
 try {
+  const ollamaPort = port + 1
+  ollamaServer = createServer((request, response) => {
+    if (request.url === '/api/version') {
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end('{"version":"test"}')
+      return
+    }
+    if (request.url === '/api/ps') {
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end('{"models":[]}')
+      return
+    }
+    if (request.url === '/api/chat' && request.method === 'POST') {
+      activeInference += 1
+      maximumObservedInference = Math.max(maximumObservedInference, activeInference)
+      request.resume()
+      setTimeout(() => {
+        activeInference -= 1
+        response.writeHead(200, { 'Content-Type': 'application/x-ndjson' })
+        response.end('{"message":{"content":"ok"},"done":true}\n')
+      }, 180)
+      return
+    }
+    response.writeHead(404)
+    response.end()
+  })
+  await new Promise((resolveListen) => ollamaServer.listen(ollamaPort, '127.0.0.1', resolveListen))
+
   await cp(join(projectDirectory, 'dist'), join(testDirectory, 'web'), {
     recursive: true,
   })
@@ -38,7 +80,8 @@ try {
       port,
       version: '1.0.0',
       allowLanAdministration: false,
-      ollamaUrl: 'http://127.0.0.1:1',
+      ollamaUrl: `http://127.0.0.1:${ollamaPort}`,
+      concurrency: { maxActiveUsers: 5, maxParallelInferences: 2 },
       imageRuntime: { url: 'http://127.0.0.1:2' },
     }),
   )
@@ -49,6 +92,9 @@ try {
     env: {
       ...process.env,
       SHOTAI_MODEL_IMPORT_LOG_PATH: modelImportLogPath,
+      SHOTAI_OLLAMA_SOURCE: 'embedded',
+      SHOTAI_OLLAMA_MODEL_DIRECTORY: join(testDirectory, 'ollama-models'),
+      SHOTAI_OLLAMA_ISOLATED: '1',
     },
   })
   server.stdout.on('data', (chunk) => process.stdout.write(chunk))
@@ -59,9 +105,47 @@ try {
   assert.equal(system.canManage, true)
   assert.equal(system.isHost, true)
   assert.equal(system.apiVersion, 2)
-  assert.equal(system.ollama.source, 'external')
+  assert.equal(system.ollama.source, 'embedded')
   assert.ok(system.ollama.modelDirectory)
   assert.ok(system.logs.directory)
+  assert.equal(system.concurrency.maxActiveUsers, 5)
+  assert.equal(system.concurrency.maxParallelInferences, 2)
+
+  const chatModel = createTestGguf()
+  const chatSha256 = createHash('sha256').update(chatModel).digest('hex')
+  const chatUpload = await fetch(
+    `http://127.0.0.1:${port}/shotai/model-import/files/Qwen3.5-9B-Q4_K_M.gguf`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(chatModel.length),
+      },
+      body: chatModel,
+    },
+  )
+  assert.equal(chatUpload.status, 201)
+  const chatUploadResult = await chatUpload.json()
+  assert.equal(chatUploadResult.sha256, chatSha256)
+  assert.equal(chatUploadResult.fastPath, true)
+  assert.equal(
+    (await stat(join(testDirectory, 'ollama-models', 'blobs', `sha256-${chatSha256}`))).size,
+    chatModel.length,
+  )
+
+  const concurrentResponses = await Promise.all(
+    Array.from({ length: 6 }, (_, index) =>
+      fetch(`http://127.0.0.1:${port}/ollama/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'qwen3.5-test', prompt: String(index) }),
+      }),
+    ),
+  )
+  const concurrentStatuses = concurrentResponses.map((response) => response.status)
+  assert.equal(concurrentStatuses.filter((status) => status === 200).length, 5)
+  assert.equal(concurrentStatuses.filter((status) => status === 429).length, 1)
+  assert.equal(maximumObservedInference, 2)
 
   const modelName = 'shotai-v1-test.gguf'
   const upload = await fetch(
@@ -124,6 +208,10 @@ try {
         desktopImportFailureLog: true,
         ollamaRuntimeReported: true,
         runtimeLogDirectoryReported: true,
+        onePassChatModelImport: true,
+        isolatedBlobFastPath: true,
+        fiveUserAdmissionLimit: true,
+        twoRequestGpuParallelism: true,
       },
       null,
       2,
@@ -131,5 +219,6 @@ try {
   )
 } finally {
   server?.kill('SIGTERM')
+  ollamaServer?.close()
   await rm(testDirectory, { recursive: true, force: true })
 }
