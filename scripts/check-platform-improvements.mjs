@@ -27,7 +27,7 @@ try {
     }
     if (path.endsWith('/tags')) {
       const models = modelAvailable
-        ? [{ name: 'local-test:latest', modified_at: '', size: 123456, digest: 'sha256:1234567890', details: { format: 'gguf', family: 'qwen', parameter_size: '1B', quantization_level: 'Q4' } }]
+        ? [{ name: 'qwen3.5-9b-instruct-q4_k_m:latest', modified_at: '', size: 123456, digest: 'sha256:1234567890', details: { format: 'gguf', family: 'qwen', parameter_size: '9B', quantization_level: 'Q4_K_M' } }]
         : []
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ models }) })
     }
@@ -54,6 +54,10 @@ try {
   })
 
   await page.goto(process.env.SHOTAI_TEST_URL || 'http://127.0.0.1:5173/', { waitUntil: 'networkidle' })
+  const selectedModelLabel = await page.locator('.model-select').innerText()
+  if (!selectedModelLabel.includes('Qwen 3.5') || selectedModelLabel.includes('instruct')) {
+    throw new Error(`model display name was not simplified: ${selectedModelLabel}`)
+  }
   await page.getByPlaceholder(/输入问题/).fill('请测试回答')
   await page.getByPlaceholder(/输入问题/).press('Enter')
   await page.getByText('这次回答已经到达长度上限。').waitFor()
@@ -77,7 +81,7 @@ try {
   await page.keyboard.press('Escape')
   await page.locator('.el-overlay:visible').first().waitFor({ state: 'hidden' })
   await page.getByLabel('打开模型管理').click()
-  await page.getByLabel('删除 local-test:latest').click()
+  await page.getByLabel('删除 qwen3.5-9b-instruct-q4_k_m:latest').click()
   await page.getByRole('button', { name: '确认删除' }).click()
   await page.getByText('模型已删除', { exact: true }).waitFor()
 
@@ -88,6 +92,7 @@ try {
   console.log(JSON.stringify({
     detail404DegradedWithoutBlockingChat: true,
     olderModelListCompatible: true,
+    simplifiedModelName: true,
     insecureClipboardFallback: true,
     legacyWordGuidance: true,
     outputLimitDetected: true,

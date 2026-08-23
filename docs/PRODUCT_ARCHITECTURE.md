@@ -1,5 +1,42 @@
 # ShotAI 产品边界与一体化路线
 
+## 仓库与平台边界
+
+ShotAI 采用“公共核心 + 平台层”的结构。当前不做高风险的大规模目录搬迁，
+先通过分支、工作树、构建入口和测试边界保证两个平台可以独立演进。
+
+```text
+公共核心
+├── 聊天界面
+├── 会话和资料库
+├── 模型抽象接口
+└── 通用测试
+
+Windows 平台层
+├── Windows 安装器
+├── Windows Ollama/runtime
+├── Windows 路径与进程管理
+└── release/windows
+
+Ubuntu 平台层
+├── Ubuntu DEB/AppImage
+├── systemd/服务器模式
+├── V100/CUDA/vLLM
+├── 多人并发与主机监控
+└── release/ubuntu
+```
+
+开发工作区固定映射如下：
+
+```text
+ShotAI-Windows -> codex/windows
+ShotAI-Ubuntu  -> codex/ubuntu
+```
+
+Ubuntu 工作区只允许安装包输出到 `release/ubuntu`，不得构建、删除或修改
+`release/windows`。Windows 专用实现不进入 Ubuntu 任务；公共核心改动必须保持
+平台无关，并由通用测试覆盖。
+
 ## 当前实际架构
 
 ```text

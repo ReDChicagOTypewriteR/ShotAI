@@ -1,10 +1,14 @@
 import {
+  appendFileSync,
+  closeSync,
   createReadStream,
   createWriteStream,
   existsSync,
   linkSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   renameSync,
   statfsSync,
@@ -85,6 +89,27 @@ const imageRuntimeDirectory = process.env.SHOTAI_IMAGE_RUNTIME_DIRECTORY
   ? resolve(process.env.SHOTAI_IMAGE_RUNTIME_DIRECTORY)
   : join(dataDirectory, 'runtime', 'image')
 const ollamaModelDirectory = join(dataDirectory, 'models', 'ollama')
+const ollamaRuntimeSource = process.env.SHOTAI_OLLAMA_SOURCE || 'external'
+const ollamaRuntimePid = Number(process.env.SHOTAI_OLLAMA_PID || 0)
+const ollamaRuntimeModelDirectory =
+  process.env.SHOTAI_OLLAMA_MODEL_DIRECTORY || ollamaModelDirectory
+const ollamaRuntimeIsolated = process.env.SHOTAI_OLLAMA_ISOLATED === '1'
+const systemOllamaDetected = process.env.SHOTAI_SYSTEM_OLLAMA_DETECTED === '1'
+const ollamaRuntimeComputeLibrary =
+  process.env.SHOTAI_OLLAMA_COMPUTE_LIBRARY || ''
+const ollamaRuntimeOffline = process.env.SHOTAI_OLLAMA_OFFLINE === '1'
+const ollamaRuntimeLogPath = process.env.SHOTAI_OLLAMA_LOG_PATH
+  ? resolve(process.env.SHOTAI_OLLAMA_LOG_PATH)
+  : ''
+const modelImportLogPath = process.env.SHOTAI_MODEL_IMPORT_LOG_PATH
+  ? resolve(process.env.SHOTAI_MODEL_IMPORT_LOG_PATH)
+  : join(dataDirectory, 'logs', 'ShotAI-model-import.log')
+const installModelImportLogPath = process.env.SHOTAI_INSTALL_MODEL_IMPORT_LOG_PATH
+  ? resolve(process.env.SHOTAI_INSTALL_MODEL_IMPORT_LOG_PATH)
+  : ''
+const runtimeLogDirectory = process.env.SHOTAI_LOG_DIRECTORY
+  ? resolve(process.env.SHOTAI_LOG_DIRECTORY)
+  : join(dataDirectory, 'logs')
 const releaseVersion = process.env.SHOTAI_VERSION || fileConfig.version || '1.0.0'
 const allowLanAdministration = fileConfig.allowLanAdministration === true
 const monitorConfig = fileConfig.monitoring || {}
@@ -104,6 +129,16 @@ let serverStartedAt = Date.now()
 let requestCount = 0
 let previousCpuSnapshot = null
 let gpuSnapshot = { checkedAt: 0, value: null }
+const modelOperationState = {
+  activeCount: 0,
+  stage: 'idle',
+  status: '',
+  startedAt: 0,
+  completedAt: 0,
+  transferredBytes: 0,
+  totalBytes: 0,
+}
+globalThis.__shotaiModelOperationState = modelOperationState
 const localAddresses = new Set(
   Object.values(networkInterfaces())
     .flat()
@@ -138,14 +173,29 @@ const contentTypes = new Map([
   ['.woff2', 'font/woff2'],
 ])
 
-function respondJson(response, statusCode, body) {
+function respondJson(response, statusCode, body, extraHeaders = {}) {
   response.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
+    'X-ShotAI-Version': releaseVersion,
+    'X-ShotAI-API-Version': '2',
+    ...extraHeaders,
   })
   response.end(JSON.stringify(body))
+}
+
+function respondMethodNotAllowed(response, allowed) {
+  respondJson(
+    response,
+    405,
+    {
+      error: `不支持当前操作（收到的方法与此接口不匹配，应使用 ${allowed}）`,
+      expectedMethod: allowed,
+    },
+    { Allow: allowed },
+  )
 }
 
 function normalizeRemoteAddress(address = '') {
@@ -273,17 +323,42 @@ function readGpuUsage() {
       (error, stdout) => {
         let value = null
         if (!error && stdout.trim()) {
-          const [name, usage, memoryUsed, memoryTotal, temperature] = stdout
+          const devices = stdout
             .trim()
-            .split('\n')[0]
-            .split(',')
-            .map((item) => item.trim())
+            .split('\n')
+            .map((line, index) => {
+              const [name, usage, memoryUsed, memoryTotal, temperature] = line
+                .split(',')
+                .map((item) => item.trim())
+              return {
+                index,
+                name,
+                usagePercent: Number(usage) || 0,
+                memoryUsedBytes: (Number(memoryUsed) || 0) * 1024 * 1024,
+                memoryTotalBytes: (Number(memoryTotal) || 0) * 1024 * 1024,
+                temperatureCelsius: Number(temperature) || 0,
+              }
+            })
+          const names = [...new Set(devices.map((device) => device.name))]
           value = {
-            name,
-            usagePercent: Number(usage) || 0,
-            memoryUsedBytes: (Number(memoryUsed) || 0) * 1024 * 1024,
-            memoryTotalBytes: (Number(memoryTotal) || 0) * 1024 * 1024,
-            temperatureCelsius: Number(temperature) || 0,
+            name:
+              names.length === 1 && devices.length > 1
+                ? `${names[0]} × ${devices.length}`
+                : names.join(' + '),
+            deviceCount: devices.length,
+            usagePercent: Math.max(...devices.map((device) => device.usagePercent)),
+            memoryUsedBytes: devices.reduce(
+              (sum, device) => sum + device.memoryUsedBytes,
+              0,
+            ),
+            memoryTotalBytes: devices.reduce(
+              (sum, device) => sum + device.memoryTotalBytes,
+              0,
+            ),
+            temperatureCelsius: Math.max(
+              ...devices.map((device) => device.temperatureCelsius),
+            ),
+            devices,
           }
         }
         gpuSnapshot = { checkedAt: Date.now(), value }
@@ -291,6 +366,98 @@ function readGpuUsage() {
       },
     )
   })
+}
+
+function tailText(path, maximumBytes = 512 * 1024) {
+  if (!path || !existsSync(path)) return ''
+  let descriptor
+  try {
+    const size = statSync(path).size
+    const length = Math.min(size, maximumBytes)
+    const buffer = Buffer.alloc(length)
+    descriptor = openSync(path, 'r')
+    readSync(descriptor, buffer, 0, length, size - length)
+    return buffer.toString('utf8')
+  } catch {
+    return ''
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        closeSync(descriptor)
+      } catch {
+        // The diagnostic log is optional.
+      }
+    }
+  }
+}
+
+function latestGpuOffload() {
+  const log = tailText(ollamaRuntimeLogPath)
+  let result = null
+  for (const match of log.matchAll(/offloaded\s+(\d+)\s*\/\s*(\d+)\s+layers?\s+to GPU/gi)) {
+    result = {
+      gpuLayers: Number(match[1]),
+      totalLayers: Number(match[2]),
+    }
+  }
+  return result
+}
+
+async function readOllamaInference() {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 3_000)
+  try {
+    const response = await fetch(createOllamaTarget('/api/ps'), {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    })
+    const body = response.ok ? await response.json() : { models: [] }
+    const loaded = Array.isArray(body.models) ? body.models[0] : null
+    if (!loaded) {
+      return {
+        state: modelOperationState.activeCount > 0 ? 'importing' : 'idle',
+        backend: 'idle',
+        model: '',
+        modelBytes: 0,
+        vramBytes: 0,
+        contextLength: 0,
+        gpuLayers: 0,
+        totalLayers: 0,
+        computeLibrary: ollamaRuntimeComputeLibrary,
+        offline: ollamaRuntimeOffline,
+      }
+    }
+    const modelBytes = Number(loaded.size || 0)
+    const vramBytes = Number(loaded.size_vram || 0)
+    const offload = latestGpuOffload()
+    return {
+      state: 'running',
+      backend: vramBytes > 0 ? 'gpu' : 'cpu',
+      model: loaded.name || loaded.model || '',
+      modelBytes,
+      vramBytes,
+      contextLength: Number(loaded.context_length || 0),
+      gpuLayers: offload?.gpuLayers || 0,
+      totalLayers: offload?.totalLayers || 0,
+      computeLibrary: ollamaRuntimeComputeLibrary,
+      offline: ollamaRuntimeOffline,
+    }
+  } catch {
+    return {
+      state: modelOperationState.activeCount > 0 ? 'importing' : 'unavailable',
+      backend: 'unknown',
+      model: '',
+      modelBytes: 0,
+      vramBytes: 0,
+      contextLength: 0,
+      gpuLayers: 0,
+      totalLayers: 0,
+      computeLibrary: ollamaRuntimeComputeLibrary,
+      offline: ollamaRuntimeOffline,
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 async function getMonitorSnapshot() {
@@ -319,6 +486,10 @@ async function getMonitorSnapshot() {
       lastSeen: client.lastSeen,
       userAgent: client.userAgent,
     }))
+  const [gpu, inference] = await Promise.all([
+    readGpuUsage(),
+    readOllamaInference(),
+  ])
   return {
     generatedAt: Date.now(),
     onlineCount: clients.length,
@@ -338,7 +509,16 @@ async function getMonitorSnapshot() {
         usagePercent: memoryTotal ? (memoryUsed / memoryTotal) * 100 : 0,
       },
       disk,
-      gpu: await readGpuUsage(),
+      gpu,
+      inference,
+      modelOperation: {
+        active: modelOperationState.activeCount > 0,
+        stage: modelOperationState.stage,
+        status: modelOperationState.status,
+        startedAt: modelOperationState.startedAt,
+        transferredBytes: modelOperationState.transferredBytes,
+        totalBytes: modelOperationState.totalBytes,
+      },
       process: {
         memoryBytes: process.memoryUsage().rss,
         requestCount,
@@ -463,6 +643,51 @@ function readJsonRequest(request, maximumBytes = 64 * 1024) {
   })
 }
 
+function safeLogText(value, maximumLength = 4_000) {
+  return String(value ?? '')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+    .slice(0, maximumLength)
+}
+
+async function appendModelImportFailure(body) {
+  const [ollama, gpu] = await Promise.all([checkOllama(), readGpuUsage()])
+  const files = Array.isArray(body.files) ? body.files.slice(0, 32) : []
+  const lines = [
+    '',
+    '============================================================',
+    `Time: ${new Date().toISOString()}`,
+    `ShotAI: ${releaseVersion}`,
+    `Host: ${hostname()} | ${operatingSystemPlatform()} ${operatingSystemRelease()}`,
+    `Ollama: ${safeLogText(ollama.version || ollama.error || 'unknown')}`,
+    `Ollama source: ${safeLogText(ollamaRuntimeSource)} | ${safeLogText(ollamaUrl.origin)}`,
+    `Ollama models: ${safeLogText(ollamaRuntimeModelDirectory)}`,
+    `GPU: ${gpu ? `${safeLogText(gpu.name)} | VRAM ${Math.round(gpu.memoryUsedBytes / 1024 / 1024)} / ${Math.round(gpu.memoryTotalBytes / 1024 / 1024)} MiB` : 'not detected'}`,
+    `Mode: ${safeLogText(body.mode || 'unknown', 80)}`,
+    `Stage: ${safeLogText(body.stage || 'unknown', 120)}`,
+    `Model name: ${safeLogText(body.modelName || '', 240)}`,
+    'Files:',
+    ...files.map((file) => {
+      const name = safeLogText(file?.name || 'unknown', 500)
+      const size = Number(file?.size) || 0
+      return `  - ${name} (${size} bytes)`
+    }),
+    `Error: ${safeLogText(body.error || 'unknown error')}`,
+    '============================================================',
+    '',
+  ]
+  mkdirSync(dirname(modelImportLogPath), { recursive: true })
+  const content = `${lines.join('\n')}\n`
+  appendFileSync(modelImportLogPath, content, 'utf8')
+  if (
+    installModelImportLogPath &&
+    installModelImportLogPath !== modelImportLogPath
+  ) {
+    mkdirSync(dirname(installModelImportLogPath), { recursive: true })
+    appendFileSync(installModelImportLogPath, content, 'utf8')
+  }
+  return modelImportLogPath
+}
+
 async function reuseOllamaModelForImages(request, response) {
   try {
     const body = await readJsonRequest(request)
@@ -548,6 +773,54 @@ async function checkOllama() {
   }
 }
 
+function beginModelOperation(request, requestUrl) {
+  const isBlob = /^\/ollama\/api\/blobs\//.test(requestUrl.pathname)
+  const token = { finished: false, statusBuffer: '' }
+  modelOperationState.activeCount += 1
+  modelOperationState.stage = isBlob ? 'upload' : 'create'
+  modelOperationState.status = isBlob
+    ? '正在写入模型文件'
+    : '正在校验并安装模型，请勿退出 ShotAI'
+  modelOperationState.startedAt ||= Date.now()
+  modelOperationState.completedAt = 0
+  modelOperationState.transferredBytes = 0
+  modelOperationState.totalBytes = Number(request.headers['content-length'] || 0)
+  if (isBlob) {
+    request.on('data', (chunk) => {
+      modelOperationState.transferredBytes += chunk.length
+    })
+  }
+  return token
+}
+
+function updateModelOperationStatus(token, chunk) {
+  token.statusBuffer += chunk.toString('utf8')
+  const lines = token.statusBuffer.split('\n')
+  token.statusBuffer = lines.pop() || ''
+  for (const line of lines) {
+    try {
+      const body = JSON.parse(line)
+      if (body.status) modelOperationState.status = String(body.status)
+      if (body.error) modelOperationState.status = `模型安装失败：${body.error}`
+    } catch {
+      // Ollama create normally streams NDJSON; ignore non-JSON diagnostics.
+    }
+  }
+}
+
+function finishModelOperation(token, succeeded, message = '') {
+  if (!token || token.finished) return
+  token.finished = true
+  modelOperationState.activeCount = Math.max(0, modelOperationState.activeCount - 1)
+  if (message) modelOperationState.status = message
+  else if (succeeded) modelOperationState.status = '模型文件处理完成'
+  if (modelOperationState.activeCount === 0) {
+    modelOperationState.stage = succeeded ? 'complete' : 'failed'
+    modelOperationState.completedAt = Date.now()
+    modelOperationState.startedAt = 0
+  }
+}
+
 function proxyLocalService(
   request,
   response,
@@ -562,6 +835,7 @@ function proxyLocalService(
     requestUrl.search,
   )
   const proxyHeaders = { ...request.headers }
+  const operation = options.operation || null
 
   // The browser sends the public ShotAI address as Origin on POST requests.
   // Ollama only trusts loopback origins by default, so forwarding that header
@@ -589,11 +863,27 @@ function proxyLocalService(
     },
     (proxyResponse) => {
       response.writeHead(proxyResponse.statusCode || 502, proxyResponse.headers)
+      if (operation) {
+        proxyResponse.on('data', (chunk) => {
+          if (options.captureStatus) updateModelOperationStatus(operation, chunk)
+        })
+        proxyResponse.once('end', () => {
+          const status = proxyResponse.statusCode || 500
+          finishModelOperation(
+            operation,
+            status >= 200 && status < 300,
+            status >= 200 && status < 300
+              ? ''
+              : `模型文件处理失败（HTTP ${status}）`,
+          )
+        })
+      }
       proxyResponse.pipe(response)
     },
   )
 
   proxyRequest.on('error', (error) => {
+    finishModelOperation(operation, false, `AI 服务连接中断：${error.message}`)
     if (response.headersSent) {
       response.destroy(error)
       return
@@ -603,16 +893,26 @@ function proxyLocalService(
     })
   })
 
-  request.on('aborted', () => proxyRequest.destroy())
+  request.on('aborted', () => {
+    finishModelOperation(operation, false, '模型导入连接已中断')
+    proxyRequest.destroy()
+  })
   request.pipe(proxyRequest)
 }
 
 function proxyOllama(request, response, requestUrl) {
+  const trackedOperation =
+    request.method === 'POST' &&
+    /^\/ollama\/api\/(?:create|blobs\/)/.test(requestUrl.pathname)
+      ? beginModelOperation(request, requestUrl)
+      : null
   proxyLocalService(request, response, requestUrl, {
     publicPrefix: /^\/ollama/,
     targetUrl: ollamaUrl,
     proxyName: 'lan',
     serviceLabel: 'AI 服务',
+    operation: trackedOperation,
+    captureStatus: requestUrl.pathname === '/ollama/api/create',
   })
 }
 
@@ -637,7 +937,7 @@ function listImageModelFiles() {
 }
 
 function selectImageModelFiles(modelFiles) {
-  const isComponent = (name) => /qwen|text.?encoder|clip|t5|vae|(?:^|[-_.])ae(?:[-_.]|$)/i.test(name)
+  const isComponent = (name) => /qwen|text.?encoder|full.?encoder.?small.?decoder|clip|t5|vae|(?:^|[-_.])ae(?:[-_.]|$)/i.test(name)
   const diffusion = modelFiles.find(
     (name) =>
       /flux.?2.*klein|z.?image.*turbo/i.test(name) && !isComponent(name),
@@ -652,7 +952,7 @@ function selectImageModelFiles(modelFiles) {
       encoders[0]
     const vae = modelFiles.find(
       (name) =>
-        /flux.?2.*vae|(?:^|[-_.])vae(?:[-_.]|$)|(?:^|[-_.])ae(?:[-_.]|$)/i.test(name) ||
+        /full.?encoder.?small.?decoder|flux.?2.*vae|(?:^|[-_.])vae(?:[-_.]|$)|(?:^|[-_.])ae(?:[-_.]|$)/i.test(name) ||
         name.toLowerCase() === 'diffusion_pytorch_model.safetensors',
     )
     const missingFiles = []
@@ -774,7 +1074,12 @@ function cleanupModelCache() {
   const referenced = collectReferencedOllamaDigests()
   const blobDirectory = join(ollamaModelDirectory, 'blobs')
   for (const path of walkFiles(blobDirectory)) {
-    const match = basename(path).match(/^sha256-([a-f0-9]{64})$/i)
+    const fileName = basename(path)
+    if (/^COPY\d+$/i.test(fileName)) {
+      removable.push(path)
+      continue
+    }
+    const match = fileName.match(/^sha256-([a-f0-9]{64})$/i)
     if (match && !referenced.has(match[1].toLowerCase())) removable.push(path)
   }
 
@@ -860,6 +1165,10 @@ const server = createServer(async (request, response) => {
       respondJson(response, 403, { error: '监控平台只能在运行 ShotAI 的主机上访问' })
       return
     }
+    if (request.method !== 'GET') {
+      respondMethodNotAllowed(response, 'GET')
+      return
+    }
     respondJson(response, 200, {
       authenticated: Boolean(monitorSession(request)),
       username: monitorUsername,
@@ -873,7 +1182,7 @@ const server = createServer(async (request, response) => {
       return
     }
     if (request.method !== 'POST') {
-      respondJson(response, 405, { error: '不支持这项操作' })
+      respondMethodNotAllowed(response, 'POST')
       return
     }
     const remoteAddress = normalizeRemoteAddress(request.socket.remoteAddress)
@@ -910,6 +1219,8 @@ const server = createServer(async (request, response) => {
         'Cache-Control': 'no-store',
         'Set-Cookie': `${MONITOR_SESSION_COOKIE}=${token}; Path=/shotai/monitor; HttpOnly; SameSite=Strict; Max-Age=${MONITOR_SESSION_TTL_MS / 1000}`,
         'X-Content-Type-Options': 'nosniff',
+        'X-ShotAI-Version': releaseVersion,
+        'X-ShotAI-API-Version': '2',
       })
       response.end(JSON.stringify({ authenticated: true, username: monitorUsername }))
     } catch (error) {
@@ -923,6 +1234,10 @@ const server = createServer(async (request, response) => {
       respondJson(response, 403, { error: '监控平台只能在运行 ShotAI 的主机上访问' })
       return
     }
+    if (request.method !== 'POST') {
+      respondMethodNotAllowed(response, 'POST')
+      return
+    }
     const token = monitorSession(request)
     if (token) monitorSessions.delete(token)
     response.writeHead(200, {
@@ -930,6 +1245,8 @@ const server = createServer(async (request, response) => {
       'Cache-Control': 'no-store',
       'Set-Cookie': `${MONITOR_SESSION_COOKIE}=; Path=/shotai/monitor; HttpOnly; SameSite=Strict; Max-Age=0`,
       'X-Content-Type-Options': 'nosniff',
+      'X-ShotAI-Version': releaseVersion,
+      'X-ShotAI-API-Version': '2',
     })
     response.end(JSON.stringify({ authenticated: false }))
     return
@@ -938,7 +1255,7 @@ const server = createServer(async (request, response) => {
   if (requestUrl.pathname === '/shotai/monitor/snapshot') {
     if (!requireHostMonitorAccess(request, response)) return
     if (request.method !== 'GET') {
-      respondJson(response, 405, { error: '不支持这项操作' })
+      respondMethodNotAllowed(response, 'GET')
       return
     }
     respondJson(response, 200, await getMonitorSnapshot())
@@ -946,14 +1263,54 @@ const server = createServer(async (request, response) => {
   }
 
   if (requestUrl.pathname === '/shotai/system') {
+    if (request.method !== 'GET') {
+      respondMethodNotAllowed(response, 'GET')
+      return
+    }
     const canManage = canManageRequest(request)
+    const hostRequest = isHostRequest(request)
     respondJson(response, 200, {
       version: releaseVersion,
+      apiVersion: 2,
       platform: process.platform,
-      isHost: isHostRequest(request),
+      isHost: hostRequest,
       canManage,
       port,
+      ollama: {
+        source: ollamaRuntimeSource,
+        endpoint: ollamaUrl.origin,
+        modelDirectory: hostRequest
+          ? ollamaRuntimeModelDirectory
+          : '由主机统一管理',
+        pid: hostRequest && ollamaRuntimePid > 0 ? ollamaRuntimePid : undefined,
+        isolated: ollamaRuntimeIsolated,
+        systemOllamaDetected,
+        computeLibrary: ollamaRuntimeComputeLibrary,
+        offline: ollamaRuntimeOffline,
+      },
+      logs: {
+        directory: hostRequest ? runtimeLogDirectory : '由主机统一管理',
+      },
     })
+    return
+  }
+
+  if (requestUrl.pathname === '/shotai/model-import-log') {
+    if (!canManageRequest(request)) {
+      respondJson(response, 403, { error: '请在运行 ShotAI 的主机上记录模型导入日志' })
+      return
+    }
+    if (request.method !== 'POST') {
+      respondJson(response, 405, { error: '不支持这项操作' })
+      return
+    }
+    try {
+      const body = await readJsonRequest(request, 48 * 1024)
+      const path = await appendModelImportFailure(body)
+      respondJson(response, 201, { saved: true, path })
+    } catch (error) {
+      respondJson(response, 500, { error: `导入日志写入失败：${error.message}` })
+    }
     return
   }
 

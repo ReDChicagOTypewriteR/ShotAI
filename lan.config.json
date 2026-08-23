@@ -5,7 +5,7 @@
     "username": "admin",
     "password": "alexjoker443477"
   },
-  "version": "1.1.7",
+  "version": "1.1.9",
   "allowLanAdministration": false,
   "ollamaUrl": "http://127.0.0.1:11434",
   "imageRuntime": {
