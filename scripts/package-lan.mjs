@@ -50,18 +50,17 @@ await copyFile(
   join(releaseDirectory, 'nginx', 'shotai.conf'),
 )
 
-const guide = await readFile(
-  join(projectDirectory, 'docs', 'LAN_DEPLOYMENT.md'),
-  'utf8',
-)
-await writeFile(join(releaseDirectory, 'DEPLOYMENT.md'), guide, 'utf8')
 await copyFile(
-  join(projectDirectory, 'docs', 'USER_GUIDE.md'),
-  join(releaseDirectory, 'USER-GUIDE.md'),
+  join(projectDirectory, 'docs', 'INSTALLATION.md'),
+  join(releaseDirectory, 'INSTALLATION.md'),
 )
 await copyFile(
-  join(projectDirectory, 'CHANGELOG.md'),
-  join(releaseDirectory, 'CHANGELOG.md'),
+  join(projectDirectory, 'docs', 'FAQ.md'),
+  join(releaseDirectory, 'FAQ.md'),
+)
+await copyFile(
+  join(projectDirectory, 'docs', 'UPDATES.md'),
+  join(releaseDirectory, 'UPDATES.md'),
 )
 await copyFile(
   join(projectDirectory, 'README.md'),

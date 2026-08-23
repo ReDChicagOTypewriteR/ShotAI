@@ -28,7 +28,7 @@ for (const [source, destination] of [
   ['deploy/lan/start-image-runtime.ps1', 'start-image-runtime.ps1'],
   ['deploy/lan/prepare-image-runtime.ps1', 'prepare-image-runtime.ps1'],
   ['deploy/lan/准备图片运行组件.bat', 'prepare-image-runtime.bat'],
-  ['docs/EXE_LITE_GUIDE.md', 'README.md'],
+  ['docs/INSTALLATION.md', 'README.md'],
 ]) {
   await copyFile(join(projectDirectory, source), join(releaseDirectory, destination))
 }

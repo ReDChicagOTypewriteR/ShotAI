@@ -24,9 +24,9 @@ const requiredFiles = [
   'runtime/ollama/LICENSE.ollama.txt',
   'runtime/ollama/SHOTAI_OLLAMA_RUNTIME_INFO.txt',
   'models/image/README-IMAGE-MODELS.txt',
-  'USER-GUIDE.md',
-  'CHANGELOG.md',
-  'DEPLOYMENT.md',
+  'INSTALLATION.md',
+  'FAQ.md',
+  'UPDATES.md',
   'web/index.html',
 ]
 
