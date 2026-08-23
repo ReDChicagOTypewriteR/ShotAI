@@ -59,11 +59,11 @@ import {
   createOllamaModel,
   deleteOllamaModel,
   embedWithOllama,
-  ensureOllamaBlob,
   formatDigest,
   formatModelSize,
   generateImageWithOllama,
   getOllamaVersion,
+  importOllamaModelFile,
   listOllamaModels,
   listRunningModels,
   normalizeOllamaModelName,
@@ -329,6 +329,15 @@ const systemInfo = ref<ShotAISystemInfo>({
   },
   logs: {
     directory: 'data/logs',
+  },
+  concurrency: {
+    maxActiveUsers: 5,
+    maxParallelInferences: 2,
+    running: 0,
+    queued: 0,
+    available: 5,
+    rejected: 0,
+    averageWaitMs: 0,
   },
 })
 const importDialogOpen = ref(false)
@@ -599,7 +608,7 @@ const imageProviderOptions = computed<ImageProviderOption[]>(() => [
   ...imageGenerationModels.value.map((model) => ({
     id: `ollama:${model.id}`,
     label: model.name,
-    detail: `${model.size} · Ollama`,
+    detail: `${model.size} · 本地 AI`,
     kind: 'ollama' as const,
     modelId: model.id,
   })),
@@ -4075,25 +4084,16 @@ async function nextImportStep() {
       return
     }
     validationRunning.value = true
-    importStatus.value = '正在检查主要模型文件'
+    importStatus.value = '正在快速检查模型文件'
     try {
       for (let index = 0; index < selectedModelFiles.value.length; index += 1) {
         const modelFile = selectedModelFiles.value[index]
         await verifyGgufFile(modelFile)
-        const sha = await calculateFileSha256(modelFile, (progress) => {
-          importStatus.value = `正在检查 ${modelFile.name} · ${index + 1}/${selectedModelFiles.value.length} · ${progress}%`
-        })
-        importFileShas.value[modelFile.name] = sha
-        if (index === 0) importSha.value = sha
+        importStatus.value = `已检查 ${modelFile.name} · ${index + 1}/${selectedModelFiles.value.length}`
       }
       if (selectedProjectorFile.value) {
         await verifyGgufFile(selectedProjectorFile.value)
-        importProjectorSha.value = await calculateFileSha256(
-          selectedProjectorFile.value,
-          (progress) => {
-            importStatus.value = `正在检查图片识别配套文件 · ${progress}%`
-          },
-        )
+        importStatus.value = '图片识别配套文件已检查'
       }
       importStep.value = 1
     } catch (error) {
@@ -4213,18 +4213,8 @@ async function startImport() {
     return
   }
   const file = selectedImportFile.value
-  if (
-    !file ||
-    !importSha.value ||
-    selectedModelFiles.value.some(
-      (modelFile) => !importFileShas.value[modelFile.name],
-    )
-  ) {
+  if (!file || selectedModelFiles.value.length === 0) {
     ElMessage.error('模型文件尚未完成校验')
-    return
-  }
-  if (selectedProjectorFile.value && !importProjectorSha.value) {
-    ElMessage.error('图片识别配套文件还没有检查完成')
     return
   }
   if (!ollamaConnected.value) {
@@ -4245,9 +4235,8 @@ async function startImport() {
     const mainUploadSpan = selectedProjectorFile.value ? 42 : 65
     for (let index = 0; index < selectedModelFiles.value.length; index += 1) {
       const modelFile = selectedModelFiles.value[index]
-      const digest = await ensureOllamaBlob(
+      const imported = await importOllamaModelFile(
         modelFile,
-        importFileShas.value[modelFile.name],
         (progress) => {
           const completed = index + progress / 100
           importProgress.value =
@@ -4257,15 +4246,22 @@ async function startImport() {
               ? `正在添加 ${modelFile.name} · ${progress}%`
               : `${modelFile.name} 已准备好`
         },
+        () => {
+          importStatus.value = `已读取 ${modelFile.name}，正在登记到 AI 服务`
+        },
       )
-      modelFiles[modelFile.name] = digest
+      importFileShas.value[modelFile.name] = imported.sha256
+      if (index === 0) importSha.value = imported.sha256
+      modelFiles[modelFile.name] = imported.digest
+      importStatus.value = imported.reused
+        ? `${modelFile.name} 已存在，直接复用`
+        : `${modelFile.name} 已写入并完成校验`
     }
 
     if (selectedProjectorFile.value) {
       const projectorFile = selectedProjectorFile.value
-      const projectorDigest = await ensureOllamaBlob(
+      const importedProjector = await importOllamaModelFile(
         projectorFile,
-        importProjectorSha.value,
         (progress) => {
           importProgress.value = 47 + Math.round(progress * 0.27)
           importStatus.value =
@@ -4273,8 +4269,13 @@ async function startImport() {
               ? `正在添加图片识别配套文件 · ${progress}%`
               : '图片识别功能已准备好'
         },
+        () => {
+          importStatus.value = '图片识别文件已读取，正在登记到 AI 服务'
+        },
       )
-      modelFiles[projectorFile.name] = projectorDigest
+      importProjectorSha.value = importedProjector.sha256
+      importFileShas.value[projectorFile.name] = importedProjector.sha256
+      modelFiles[projectorFile.name] = importedProjector.digest
     }
 
     importProgress.value = 74
@@ -5928,10 +5929,10 @@ onBeforeUnmount(() => {
             <div>
               <strong>{{ ollamaRuntimeLabel }}</strong>
               <span v-if="systemInfo.ollama.isolated">
-                模型只从 {{ systemInfo.ollama.modelDirectory }} 读取；即使系统 Ollama 正在运行，也不会混用它的模型。
+                模型只从 {{ systemInfo.ollama.modelDirectory }} 读取；即使系统中还有另一个 AI 服务，也不会混用它的模型。
               </span>
               <span v-else>
-                当前模型由 {{ systemInfo.ollama.endpoint }} 提供，模型列表可能来自外部 Ollama。
+                当前模型由 {{ systemInfo.ollama.endpoint }} 提供，模型列表可能来自外部 AI 服务。
               </span>
               <span>升级或重新安装会保留模型；如需全新状态，请使用上方“清空模型”。</span>
             </div>
@@ -7035,6 +7036,20 @@ onBeforeUnmount(() => {
                   {{ monitorSnapshot.performance.inference.offline ? '完全离线' : '标准模式' }}
                 </strong>
               </div>
+              <div>
+                <span>用户容量</span>
+                <strong>
+                  {{ monitorSnapshot.performance.concurrency.running + monitorSnapshot.performance.concurrency.queued }} /
+                  {{ monitorSnapshot.performance.concurrency.maxActiveUsers }} 人
+                </strong>
+              </div>
+              <div>
+                <span>负载调度</span>
+                <strong>
+                  {{ monitorSnapshot.performance.concurrency.running }} 个运行 ·
+                  {{ monitorSnapshot.performance.concurrency.queued }} 个排队
+                </strong>
+              </div>
             </div>
 
             <div
@@ -7316,14 +7331,17 @@ onBeforeUnmount(() => {
                 <el-input v-model="importName" maxlength="60" />
               </el-form-item>
               <el-form-item label="主要文件校验码">
-                <el-input :model-value="`sha256:${importSha}`" readonly />
+                <el-input
+                  :model-value="importSha ? `sha256:${importSha}` : '导入时边写入边校验，避免提前重复读取大文件'"
+                  readonly
+                />
               </el-form-item>
               <el-form-item
                 v-if="importMetadata.isVisionImport"
                 label="图片识别文件校验码"
               >
                 <el-input
-                  :model-value="`sha256:${importProjectorSha}`"
+                  :model-value="importProjectorSha ? `sha256:${importProjectorSha}` : '导入时自动计算并校验'"
                   readonly
                 />
               </el-form-item>
@@ -7349,6 +7367,7 @@ onBeforeUnmount(() => {
               <div class="import-plan">
                 <span><el-icon><Check /></el-icon> 不发送到网络</span>
                 <span><el-icon><Check /></el-icon> 只在这台电脑处理</span>
+                <span><el-icon><Check /></el-icon> 一次读取并完成校验</span>
                 <span><el-icon><Check /></el-icon> 重复文件自动复用</span>
               </div>
             </div>

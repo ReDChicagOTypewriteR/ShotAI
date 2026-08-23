@@ -113,6 +113,18 @@ const runtimeLogDirectory = process.env.SHOTAI_LOG_DIRECTORY
 const releaseVersion = process.env.SHOTAI_VERSION || fileConfig.version || '1.0.0'
 const allowLanAdministration = fileConfig.allowLanAdministration === true
 const monitorConfig = fileConfig.monitoring || {}
+const concurrencyConfig = fileConfig.concurrency || {}
+const maximumActiveUsers = Math.max(
+  1,
+  Math.min(20, Number(process.env.SHOTAI_MAX_ACTIVE_USERS || concurrencyConfig.maxActiveUsers || 5)),
+)
+const maximumParallelInferences = Math.max(
+  1,
+  Math.min(
+    maximumActiveUsers,
+    Number(process.env.SHOTAI_MAX_PARALLEL_INFERENCES || concurrencyConfig.maxParallelInferences || 2),
+  ),
+)
 const monitorUsername = String(
   process.env.SHOTAI_MONITOR_USERNAME || monitorConfig.username || 'admin',
 )
@@ -139,6 +151,13 @@ const modelOperationState = {
   totalBytes: 0,
 }
 globalThis.__shotaiModelOperationState = modelOperationState
+const inferenceQueue = []
+const inferenceLoadState = {
+  running: 0,
+  rejected: 0,
+  completed: 0,
+  totalWaitMs: 0,
+}
 const localAddresses = new Set(
   Object.values(networkInterfaces())
     .flat()
@@ -196,6 +215,23 @@ function respondMethodNotAllowed(response, allowed) {
     },
     { Allow: allowed },
   )
+}
+
+function inferenceLoadSnapshot() {
+  return {
+    maxActiveUsers: maximumActiveUsers,
+    maxParallelInferences: maximumParallelInferences,
+    running: inferenceLoadState.running,
+    queued: inferenceQueue.length,
+    available: Math.max(
+      0,
+      maximumActiveUsers - inferenceLoadState.running - inferenceQueue.length,
+    ),
+    rejected: inferenceLoadState.rejected,
+    averageWaitMs: inferenceLoadState.completed
+      ? Math.round(inferenceLoadState.totalWaitMs / inferenceLoadState.completed)
+      : 0,
+  }
 }
 
 function normalizeRemoteAddress(address = '') {
@@ -519,6 +555,7 @@ async function getMonitorSnapshot() {
         transferredBytes: modelOperationState.transferredBytes,
         totalBytes: modelOperationState.totalBytes,
       },
+      concurrency: inferenceLoadSnapshot(),
       process: {
         memoryBytes: process.memoryUsage().rss,
         requestCount,
@@ -615,6 +652,185 @@ function saveImageModel(request, response, requestUrl) {
       sha256,
       sharedWithChat: ensureSharedOllamaBlob(destination, sha256),
     })
+  })
+  request.pipe(output)
+}
+
+function getChatImportFileName(requestUrl) {
+  const prefix = '/shotai/model-import/files/'
+  if (!requestUrl.pathname.startsWith(prefix)) return ''
+  let decoded = ''
+  try {
+    decoded = decodeURIComponent(requestUrl.pathname.slice(prefix.length))
+  } catch {
+    return ''
+  }
+  const fileName = basename(decoded)
+  return fileName.toLowerCase().endsWith('.gguf') ? fileName : ''
+}
+
+function verifySavedGguf(path) {
+  const descriptor = openSync(path, 'r')
+  try {
+    const header = Buffer.alloc(24)
+    if (readSync(descriptor, header, 0, header.length, 0) !== header.length) {
+      throw new Error('模型文件不完整')
+    }
+    if (header.toString('ascii', 0, 4) !== 'GGUF') {
+      throw new Error('文件不是有效的 GGUF 模型')
+    }
+    const version = header.readUInt32LE(4)
+    if (version < 2 || version > 3) {
+      throw new Error(`不支持 GGUF V${version}，请使用 GGUF V3 模型`)
+    }
+  } finally {
+    closeSync(descriptor)
+  }
+}
+
+function ollamaBlobRequest(method, digest, bodyPath = '', size = 0) {
+  return new Promise((resolveRequest, rejectRequest) => {
+    const target = createOllamaTarget(`/api/blobs/${digest}`)
+    const transport = target.protocol === 'https:' ? httpsRequest : httpRequest
+    const internalRequest = transport(
+      target,
+      {
+        method,
+        headers: bodyPath
+          ? {
+              'Content-Type': 'application/octet-stream',
+              'Content-Length': String(size),
+            }
+          : {},
+      },
+      (internalResponse) => {
+        const chunks = []
+        let total = 0
+        internalResponse.on('data', (chunk) => {
+          if (total < 16 * 1024) chunks.push(chunk)
+          total += chunk.length
+        })
+        internalResponse.on('end', () => {
+          const status = internalResponse.statusCode || 500
+          if (status >= 200 && status < 300) {
+            resolveRequest({ status, exists: true })
+            return
+          }
+          if (method === 'HEAD' && status === 404) {
+            resolveRequest({ status, exists: false })
+            return
+          }
+          let message = Buffer.concat(chunks).toString('utf8').trim()
+          try {
+            message = JSON.parse(message).error || message
+          } catch {
+            // Keep the service's plain-text error.
+          }
+          rejectRequest(new Error(message || `Ollama 写入失败（HTTP ${status}）`))
+        })
+      },
+    )
+    internalRequest.on('error', rejectRequest)
+    if (bodyPath) {
+      const input = createReadStream(bodyPath)
+      input.on('error', rejectRequest)
+      input.pipe(internalRequest)
+    } else {
+      internalRequest.end()
+    }
+  })
+}
+
+async function registerChatModelBlob(temporary, sha256, size) {
+  const digest = `sha256:${sha256}`
+  if (ollamaRuntimeIsolated) {
+    const destination = join(
+      resolve(ollamaRuntimeModelDirectory),
+      'blobs',
+      `sha256-${sha256}`,
+    )
+    mkdirSync(dirname(destination), { recursive: true })
+    if (existsSync(destination) && statSync(destination).size === size) {
+      unlinkSync(temporary)
+      return { digest, reused: true, fastPath: true }
+    }
+    if (existsSync(destination)) unlinkSync(destination)
+    renameSync(temporary, destination)
+    return { digest, reused: false, fastPath: true }
+  }
+
+  const existing = await ollamaBlobRequest('HEAD', digest)
+  if (existing.exists) {
+    unlinkSync(temporary)
+    return { digest, reused: true, fastPath: false }
+  }
+  await ollamaBlobRequest('POST', digest, temporary, size)
+  unlinkSync(temporary)
+  return { digest, reused: false, fastPath: false }
+}
+
+function saveChatModelFile(request, response, requestUrl) {
+  const fileName = getChatImportFileName(requestUrl)
+  if (!fileName) {
+    respondJson(response, 400, { error: '请选择有效的 GGUF 聊天模型文件' })
+    return
+  }
+  const contentLength = Number(request.headers['content-length'] || 0)
+  if (!contentLength || contentLength > 80 * 1024 * 1024 * 1024) {
+    respondJson(response, 413, { error: '模型文件大小无效或超过 80 GB' })
+    return
+  }
+
+  const stagingDirectory = join(dataDirectory, 'models', 'imports')
+  mkdirSync(stagingDirectory, { recursive: true })
+  const temporary = join(
+    stagingDirectory,
+    `${Date.now()}-${randomBytes(8).toString('hex')}.uploading`,
+  )
+  const output = createWriteStream(temporary, { flags: 'wx' })
+  const hasher = createHash('sha256')
+  const operation = beginModelOperation(request, requestUrl)
+  let received = 0
+  let failed = false
+
+  const fail = (status, error) => {
+    if (failed) return
+    failed = true
+    if (existsSync(temporary)) unlinkSync(temporary)
+    finishModelOperation(operation, false, error.message)
+    if (!response.headersSent) respondJson(response, status, { error: error.message })
+  }
+
+  request.on('data', (chunk) => {
+    received += chunk.length
+    hasher.update(chunk)
+  })
+  request.on('aborted', () => {
+    output.destroy()
+    fail(499, new Error('模型导入已取消'))
+  })
+  output.on('error', (error) => fail(500, new Error(`保存失败：${error.message}`)))
+  output.on('finish', async () => {
+    if (failed) return
+    try {
+      if (received !== contentLength) throw new Error('文件上传不完整，请重新选择')
+      verifySavedGguf(temporary)
+      const sha256 = hasher.digest('hex')
+      modelOperationState.stage = 'register'
+      modelOperationState.status = ollamaRuntimeIsolated
+        ? '正在登记模型文件'
+        : '正在写入外部 Ollama'
+      const registered = await registerChatModelBlob(temporary, sha256, received)
+      finishModelOperation(operation, true)
+      respondJson(response, 201, {
+        fileName,
+        size: received,
+        sha256,
+        ...registered,
+      })
+    } catch (error) {
+      fail(500, error instanceof Error ? error : new Error(String(error)))
+    }
   })
   request.pipe(output)
 }
@@ -774,7 +990,9 @@ async function checkOllama() {
 }
 
 function beginModelOperation(request, requestUrl) {
-  const isBlob = /^\/ollama\/api\/blobs\//.test(requestUrl.pathname)
+  const isBlob =
+    /^\/ollama\/api\/blobs\//.test(requestUrl.pathname) ||
+    requestUrl.pathname.startsWith('/shotai/model-import/files/')
   const token = { finished: false, statusBuffer: '' }
   modelOperationState.activeCount += 1
   modelOperationState.stage = isBlob ? 'upload' : 'create'
@@ -836,6 +1054,12 @@ function proxyLocalService(
   )
   const proxyHeaders = { ...request.headers }
   const operation = options.operation || null
+  let completed = false
+  const complete = () => {
+    if (completed) return
+    completed = true
+    options.onComplete?.()
+  }
 
   // The browser sends the public ShotAI address as Origin on POST requests.
   // Ollama only trusts loopback origins by default, so forwarding that header
@@ -876,7 +1100,10 @@ function proxyLocalService(
               ? ''
               : `模型文件处理失败（HTTP ${status}）`,
           )
+          complete()
         })
+      } else {
+        proxyResponse.once('end', complete)
       }
       proxyResponse.pipe(response)
     },
@@ -884,6 +1111,7 @@ function proxyLocalService(
 
   proxyRequest.on('error', (error) => {
     finishModelOperation(operation, false, `AI 服务连接中断：${error.message}`)
+    complete()
     if (response.headersSent) {
       response.destroy(error)
       return
@@ -895,12 +1123,13 @@ function proxyLocalService(
 
   request.on('aborted', () => {
     finishModelOperation(operation, false, '模型导入连接已中断')
+    complete()
     proxyRequest.destroy()
   })
   request.pipe(proxyRequest)
 }
 
-function proxyOllama(request, response, requestUrl) {
+function proxyOllamaDirect(request, response, requestUrl, onComplete) {
   const trackedOperation =
     request.method === 'POST' &&
     /^\/ollama\/api\/(?:create|blobs\/)/.test(requestUrl.pathname)
@@ -913,7 +1142,88 @@ function proxyOllama(request, response, requestUrl) {
     serviceLabel: 'AI 服务',
     operation: trackedOperation,
     captureStatus: requestUrl.pathname === '/ollama/api/create',
+    onComplete,
   })
+}
+
+function isScheduledInference(request, requestUrl) {
+  return request.method === 'POST' &&
+    /^\/ollama\/api\/(?:chat|generate)$/.test(requestUrl.pathname)
+}
+
+function drainInferenceQueue() {
+  while (
+    inferenceLoadState.running < maximumParallelInferences &&
+    inferenceQueue.length > 0
+  ) {
+    const next = inferenceQueue.shift()
+    if (!next || next.cancelled || next.response.destroyed) continue
+    startScheduledInference(next)
+  }
+}
+
+function finishScheduledInference(item) {
+  if (item.finished) return
+  item.finished = true
+  inferenceLoadState.running = Math.max(0, inferenceLoadState.running - 1)
+  inferenceLoadState.completed += 1
+  inferenceLoadState.totalWaitMs += item.startedAt - item.queuedAt
+  drainInferenceQueue()
+}
+
+function startScheduledInference(item) {
+  item.startedAt = Date.now()
+  inferenceLoadState.running += 1
+  proxyOllamaDirect(
+    item.request,
+    item.response,
+    item.requestUrl,
+    () => finishScheduledInference(item),
+  )
+}
+
+function proxyOllama(request, response, requestUrl) {
+  if (!isScheduledInference(request, requestUrl)) {
+    proxyOllamaDirect(request, response, requestUrl)
+    return
+  }
+
+  const active = inferenceLoadState.running + inferenceQueue.length
+  if (active >= maximumActiveUsers) {
+    inferenceLoadState.rejected += 1
+    respondJson(
+      response,
+      429,
+      {
+        error: `当前已有 ${maximumActiveUsers} 位用户正在使用 AI，请稍后重试`,
+        concurrency: inferenceLoadSnapshot(),
+      },
+      { 'Retry-After': '5' },
+    )
+    return
+  }
+
+  const item = {
+    request,
+    response,
+    requestUrl,
+    queuedAt: Date.now(),
+    startedAt: 0,
+    cancelled: false,
+    finished: false,
+  }
+  request.once('aborted', () => {
+    if (item.startedAt) return
+    item.cancelled = true
+    const index = inferenceQueue.indexOf(item)
+    if (index >= 0) inferenceQueue.splice(index, 1)
+  })
+
+  if (inferenceLoadState.running < maximumParallelInferences) {
+    startScheduledInference(item)
+  } else {
+    inferenceQueue.push(item)
+  }
 }
 
 function proxyImageRuntime(request, response, requestUrl) {
@@ -1291,6 +1601,7 @@ const server = createServer(async (request, response) => {
       logs: {
         directory: hostRequest ? runtimeLogDirectory : '由主机统一管理',
       },
+      concurrency: inferenceLoadSnapshot(),
     })
     return
   }
@@ -1311,6 +1622,19 @@ const server = createServer(async (request, response) => {
     } catch (error) {
       respondJson(response, 500, { error: `导入日志写入失败：${error.message}` })
     }
+    return
+  }
+
+  if (requestUrl.pathname.startsWith('/shotai/model-import/files/')) {
+    if (!canManageRequest(request)) {
+      respondJson(response, 403, { error: '请在运行 ShotAI 的主机上导入模型' })
+      return
+    }
+    if (request.method !== 'PUT') {
+      respondMethodNotAllowed(response, 'PUT')
+      return
+    }
+    saveChatModelFile(request, response, requestUrl)
     return
   }
 
