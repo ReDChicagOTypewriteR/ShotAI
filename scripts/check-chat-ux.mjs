@@ -134,7 +134,7 @@ try {
     timeout: 20_000,
   })
   await page.waitForFunction(
-    () => document.body.innerText.includes('qwen3-vl:8b-instruct'),
+    () => document.querySelector('.model-select')?.textContent?.includes('Qwen'),
     undefined,
     { timeout: 20_000 },
   )
@@ -190,6 +190,37 @@ try {
   }
   const stopButton = page.locator('.composer-action-button.is-stop')
   await stopButton.waitFor({ state: 'visible', timeout: 5_000 })
+  const splitMessageMetrics = await page.evaluate(() => {
+    const stage = document.querySelector('.message-stage')?.getBoundingClientRect()
+    const assistant = document
+      .querySelector('.elx-bubble--start .elx-bubble__content-wrapper')
+      ?.getBoundingClientRect()
+    const user = document
+      .querySelector('.elx-bubble--end .elx-bubble__content-wrapper')
+      ?.getBoundingClientRect()
+    if (!stage || !assistant || !user) return null
+    return {
+      stageLeft: Math.round(stage.left),
+      stageRight: Math.round(stage.right),
+      stageWidth: Math.round(stage.width),
+      assistantLeft: Math.round(assistant.left),
+      assistantWidth: Math.round(assistant.width),
+      userLeft: Math.round(user.left),
+      userRight: Math.round(user.right),
+      userWidth: Math.round(user.width),
+    }
+  })
+  if (
+    !splitMessageMetrics ||
+    splitMessageMetrics.userLeft - splitMessageMetrics.assistantLeft <
+      splitMessageMetrics.stageWidth * 0.25 ||
+    splitMessageMetrics.userRight <
+      splitMessageMetrics.stageLeft + splitMessageMetrics.stageWidth * 0.8
+  ) {
+    throw new Error(
+      `messages are not split across the reading stage: ${JSON.stringify(splitMessageMetrics)}`,
+    )
+  }
   await page.screenshot({
     path: '/private/tmp/shotai-chat-ux-generating.png',
     fullPage: false,
@@ -376,12 +407,14 @@ try {
         finishedTypingStateCleared: true,
         lightThemeDrawerReadable: true,
         focusedDesktopLayout: true,
+        splitMessageAlignment: true,
         visionModelGuideVisible: true,
         abortedChatRequests,
         editorMetrics,
         messageScrollMetrics,
         streamingScrollMetrics,
         lightThemeMetrics,
+        splitMessageMetrics,
       },
       null,
       2,

@@ -26,6 +26,7 @@ for (const path of [
   libraryDirectory,
   join(runtimeDirectory, 'LICENSE.ollama.txt'),
   join(runtimeDirectory, 'SHOTAI_OLLAMA_RUNTIME_INFO.txt'),
+  join(projectDirectory, 'desktop', 'electron', 'after-install-linux.sh'),
 ]) {
   await access(path, constants.R_OK)
 }
@@ -48,6 +49,7 @@ assert.equal(
   fullConfig.linux.artifactName,
   'ShotAI-${version}-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.${ext}',
 )
+assert.equal(fullConfig.directories.output, 'release/ubuntu')
 assert.ok(
   fullConfig.extraResources.some(
     (resource) =>
@@ -57,6 +59,23 @@ assert.ok(
   ),
 )
 assert.ok(mainSource.includes("[name, join('bin', name)]"))
+assert.ok(mainSource.includes('findPrivateOllamaUrl'))
+assert.ok(mainSource.includes('SHOTAI_OLLAMA_MODEL_DIRECTORY'))
+assert.ok(mainSource.includes('SHOTAI_SYSTEM_OLLAMA_DETECTED'))
+assert.ok(mainSource.includes('请先从托盘退出旧版 ShotAI'))
+assert.ok(mainSource.includes('prepareRuntimeLogDirectory'))
+assert.ok(mainSource.includes("runtimeLogFile('ollama.log')") || mainSource.includes("openProcessLog('ollama.log')"))
+assert.ok(mainSource.includes("bundledCudaLibrary(executable, 'cuda_v12')"))
+assert.ok(mainSource.includes("OLLAMA_LLM_LIBRARY: preferredComputeLibrary"))
+assert.ok(mainSource.includes("OLLAMA_NO_CLOUD: 'true'"))
+assert.ok(mainSource.includes("process.env.OLLAMA_CONTEXT_LENGTH || '8192'"))
+assert.ok(mainSource.includes("process.kill(-child.pid, 'SIGTERM')"))
+assert.ok(mainSource.includes('confirmQuitDuringModelImport'))
+assert.ok(mainSource.includes('cleanupInterruptedOllamaCopies'))
+assert.equal(
+  packageJson.build.deb.afterInstall,
+  'desktop/electron/after-install-linux.sh',
+)
 assert.ok(packageJson.scripts['electron:pack:ubuntu:full'])
 assert.equal(
   packageJson.scripts['build:ubuntu:full'],
@@ -71,6 +90,13 @@ console.log(
       bundledOllama: true,
       bundledCudaLibraries: true,
       bundledModels: false,
+      isolatedOllamaRuntime: true,
+      oldServiceConflictGuard: true,
+      installDirectoryLogs: true,
+      v100Cuda12Pinned: true,
+      offlineCloudRequestsDisabled: true,
+      importExitProtection: true,
+      interruptedCopyCleanup: true,
       imageRuntime: 'requires Ubuntu 22.04 native build',
     },
     null,

@@ -298,10 +298,23 @@ const imageRuntime = ref<ImageRuntimeStatus>({
 })
 const systemInfo = ref<ShotAISystemInfo>({
   version: '1.0.0',
+  apiVersion: 1,
   platform: 'unknown',
   isHost: true,
   canManage: true,
   port: 9090,
+  ollama: {
+    source: 'external',
+    endpoint: 'http://127.0.0.1:11434',
+    modelDirectory: '由外部 Ollama 管理',
+    isolated: false,
+    systemOllamaDetected: false,
+    computeLibrary: '',
+    offline: false,
+  },
+  logs: {
+    directory: 'data/logs',
+  },
 })
 const importDialogOpen = ref(false)
 const importStep = ref(0)
@@ -377,6 +390,7 @@ const knowledgeImporting = ref(false)
 const knowledgeImportProgress = ref(0)
 const knowledgeImportStatus = ref('')
 const modelCacheCleaning = ref(false)
+const allModelsRemoving = ref(false)
 const selectedKnowledgeBaseId = ref('')
 const embeddingModelId = ref('')
 let chatController: AbortController | undefined
@@ -581,6 +595,13 @@ const hostPlatformLabel = computed(() => {
   if (systemInfo.value.platform === 'win32') return 'Windows'
   if (systemInfo.value.platform === 'darwin') return 'macOS'
   return '主机'
+})
+
+const ollamaRuntimeLabel = computed(() => {
+  if (systemInfo.value.ollama.source === 'embedded') return 'ShotAI 内置并独立运行'
+  if (systemInfo.value.ollama.source === 'managed') return '由 ShotAI 启动'
+  if (systemInfo.value.ollama.source === 'external') return '使用外部 Ollama'
+  return '尚未找到 AI 服务'
 })
 
 const selectedImageProvider = computed(() => {
@@ -827,8 +848,18 @@ const systemChecks = computed(() => [
   },
   {
     label: '连接位置',
-    value: ollamaConnectionLabel,
+    value: ollamaRuntimeLabel.value,
     ok: ollamaConnectionState.value === 'online',
+  },
+  {
+    label: '模型目录',
+    value: systemInfo.value.ollama.modelDirectory,
+    ok: systemInfo.value.ollama.source !== 'unavailable',
+  },
+  {
+    label: '运行日志',
+    value: systemInfo.value.logs.directory,
+    ok: true,
   },
   {
     label: '模型信息',
@@ -1536,6 +1567,34 @@ function formatMonitorDuration(seconds = 0) {
   return `${Math.max(0, minutes)} 分钟`
 }
 
+function monitorInferenceStateLabel(snapshot: MonitorSnapshot) {
+  if (snapshot.performance.modelOperation.active) return '正在导入模型'
+  const inference = snapshot.performance.inference
+  if (inference.state === 'running' && inference.backend === 'gpu') return 'GPU 推理'
+  if (inference.state === 'running' && inference.backend === 'cpu') return 'CPU 推理'
+  if (inference.state === 'unavailable') return 'AI 服务未连接'
+  return '等待模型调用'
+}
+
+function monitorComputeLibraryLabel(library: string) {
+  if (library === 'cuda_v12') return 'CUDA 12 · V100 兼容'
+  if (library === 'cuda_v13') return 'CUDA 13'
+  return library || '自动选择'
+}
+
+function friendlyModelCreateStatus(status: string, totalBytes: number) {
+  const normalized = status.toLowerCase()
+  const largeModel = totalBytes >= 8 * 1024 ** 3
+  if (/quantiz|convert|copy/.test(normalized)) {
+    return largeModel
+      ? '正在转换并完整校验大模型，可能需要 10–30 分钟，请勿退出 ShotAI'
+      : '正在转换并校验模型，请勿退出 ShotAI'
+  }
+  if (/manifest|writing/.test(normalized)) return '正在写入模型清单'
+  if (/success/.test(normalized)) return '模型文件安装完成'
+  return status
+}
+
 function maskMonitorIp(ip: string) {
   if (!monitorHideIps.value) return ip
   if (ip.includes(':')) {
@@ -1601,6 +1660,12 @@ async function openMonitor() {
   }
   monitorDrawerOpen.value = true
   monitorLoginError.value = ''
+  if (systemInfo.value.apiVersion < 2) {
+    monitorAuthenticated.value = false
+    monitorLoginError.value =
+      '当前页面连接到了旧版主机服务。请从 Ubuntu 系统托盘完全退出 ShotAI，再启动新版；只关闭窗口不会停止后台服务。'
+    return
+  }
   try {
     const session = await getMonitorSession()
     monitorAuthenticated.value = session.authenticated
@@ -1613,6 +1678,7 @@ async function openMonitor() {
 }
 
 async function submitMonitorLogin() {
+  if (monitorLoginLoading.value) return
   if (!monitorUsername.value.trim() || !monitorPassword.value) {
     monitorLoginError.value = '请输入用户名和密码'
     return
@@ -3978,10 +4044,17 @@ async function startImport() {
     }
 
     importProgress.value = 74
-    importStatus.value = '正在完成模型安装'
+    const totalModelBytes = selectedModelFiles.value.reduce(
+      (sum, modelFile) => sum + modelFile.size,
+      selectedProjectorFile.value?.size || 0,
+    )
+    importStatus.value =
+      totalModelBytes >= 8 * 1024 ** 3
+        ? '正在转换并校验大模型，可能需要 10–30 分钟，请勿退出 ShotAI'
+        : '正在完成模型安装，请勿退出 ShotAI'
     stage = 'create'
     await createOllamaModel(modelName, modelFiles, (status) => {
-      importStatus.value = status
+      importStatus.value = friendlyModelCreateStatus(status, totalModelBytes)
       importProgress.value = Math.min(92, importProgress.value + 3)
     })
     modelCreated = true
@@ -4130,6 +4203,58 @@ async function removeModel(model: LocalModel) {
     ElMessage.success('模型已删除')
   } catch (error) {
     ElMessage.error(`删除失败：${getErrorMessage(error)}`)
+  }
+}
+
+async function removeAllConversationModels() {
+  if (!systemInfo.value.canManage || allModelsRemoving.value || models.length === 0) return
+  const targets = models.map((model) => ({ id: model.id, name: model.name }))
+  try {
+    await ElMessageBox.confirm(
+      `将删除 ShotAI 当前目录中的 ${targets.length} 个 Ollama 模型（共 ${totalModelSize.value}）。重新安装不会自动恢复，之后需要重新导入。图片运行组件中的模型文件不受影响。`,
+      '清空 ShotAI 对话模型',
+      {
+        type: 'warning',
+        confirmButtonText: '确认全部删除',
+        cancelButtonText: '取消',
+      },
+    )
+  } catch {
+    return
+  }
+
+  allModelsRemoving.value = true
+  const deletedIds = new Set<string>()
+  const failures: string[] = []
+  try {
+    for (const model of targets) {
+      try {
+        await deleteOllamaModel(model.id)
+        deletedIds.add(model.id)
+      } catch (error) {
+        failures.push(`${model.name}：${getErrorMessage(error)}`)
+      }
+    }
+    conversations.value.forEach((conversation) => {
+      if (deletedIds.has(conversation.modelId)) conversation.modelId = ''
+    })
+    if (deletedIds.has(embeddingModelId.value)) embeddingModelId.value = ''
+    const imageModelMatch = imageModelId.value.match(/^ollama:(.+)$/)
+    if (imageModelMatch && deletedIds.has(imageModelMatch[1])) {
+      imageModelId.value = AUTO_IMAGE_PROVIDER_ID
+    }
+    await refreshOllama()
+    if (failures.length) {
+      ElMessage.error({
+        message: `已删除 ${deletedIds.size} 个，${failures.length} 个删除失败：${failures.join('；')}`,
+        duration: 0,
+        showClose: true,
+      })
+    } else {
+      ElMessage.success('ShotAI 对话模型已经全部删除')
+    }
+  } finally {
+    allModelsRemoving.value = false
   }
 }
 
@@ -5494,6 +5619,16 @@ onBeforeUnmount(() => {
                 刷新
               </el-button>
               <el-button
+                v-if="systemInfo.canManage && models.length"
+                type="danger"
+                plain
+                :loading="allModelsRemoving"
+                :disabled="isGenerating"
+                @click="removeAllConversationModels"
+              >
+                清空模型
+              </el-button>
+              <el-button
                 v-if="systemInfo.canManage"
                 type="primary"
                 @click="openImportDialog"
@@ -5520,6 +5655,20 @@ onBeforeUnmount(() => {
               :show-text="false"
             />
             <span class="storage-free">版本 {{ ollamaVersion }}</span>
+          </div>
+
+          <div v-if="systemInfo.canManage" class="host-managed-note compact">
+            <el-icon><Cpu /></el-icon>
+            <div>
+              <strong>{{ ollamaRuntimeLabel }}</strong>
+              <span v-if="systemInfo.ollama.isolated">
+                模型只从 {{ systemInfo.ollama.modelDirectory }} 读取；即使系统 Ollama 正在运行，也不会混用它的模型。
+              </span>
+              <span v-else>
+                当前模型由 {{ systemInfo.ollama.endpoint }} 提供，模型列表可能来自外部 Ollama。
+              </span>
+              <span>升级或重新安装会保留模型；如需全新状态，请使用上方“清空模型”。</span>
+            </div>
           </div>
 
           <section
@@ -6313,17 +6462,22 @@ onBeforeUnmount(() => {
               <div class="parameter-row parameter-switch-row">
                 <div>
                   <strong>显示回答思路</strong>
-                  <span>关闭后只显示最终回答，也会减少等待时间</span>
+                  <span>
+                    {{ selectedModel.capabilities.includes('thinking')
+                      ? '关闭后只显示最终回答，也会减少等待时间'
+                      : '当前模型不支持思考输出，这个开关不会改变回答' }}
+                  </span>
                 </div>
                 <el-switch
                   v-model="showReasoning"
+                  :disabled="!selectedModel.capabilities.includes('thinking')"
                   aria-label="显示回答思路"
                 />
               </div>
               <div class="parameter-row">
                 <div>
                   <strong>回答变化程度</strong>
-                  <span>越低越稳定，越高越有变化</span>
+                  <span>越低越稳定，越高越有变化；部分模型会自行限制随机性</span>
                 </div>
                 <el-slider
                   v-model="activeConversationRecord.settings.temperature"
@@ -6496,7 +6650,11 @@ onBeforeUnmount(() => {
             <span class="monitor-kicker">HOST CONTROL</span>
             <h3 id="monitor-login-title">管理员验证</h3>
             <p>监控信息不会向局域网中的其他电脑开放。</p>
-            <form @submit.prevent="submitMonitorLogin">
+            <form
+              method="post"
+              action="/shotai/monitor/login"
+              @submit.prevent="submitMonitorLogin"
+            >
               <label>
                 <span>用户名</span>
                 <el-input
@@ -6514,7 +6672,6 @@ onBeforeUnmount(() => {
                   :type="monitorPasswordVisible ? 'text' : 'password'"
                   autocomplete="current-password"
                   aria-label="管理员密码"
-                  @keydown.enter="submitMonitorLogin"
                 >
                   <template #prefix><el-icon><Lock /></el-icon></template>
                   <template #suffix>
@@ -6564,6 +6721,69 @@ onBeforeUnmount(() => {
             </article>
           </section>
 
+          <section
+            class="monitor-runtime-card"
+            aria-label="当前模型运行方式"
+          >
+            <div class="monitor-runtime-heading">
+              <div>
+                <span class="monitor-card-label">AI 运行方式</span>
+                <h3>
+                  {{ monitorSnapshot.performance.inference.model || '尚未载入对话模型' }}
+                </h3>
+              </div>
+              <span
+                class="monitor-runtime-state"
+                :class="`is-${monitorSnapshot.performance.modelOperation.active ? 'importing' : monitorSnapshot.performance.inference.backend}`"
+              >
+                <i></i>{{ monitorInferenceStateLabel(monitorSnapshot) }}
+              </span>
+            </div>
+
+            <div class="monitor-runtime-grid">
+              <div>
+                <span>计算后端</span>
+                <strong>
+                  {{ monitorComputeLibraryLabel(monitorSnapshot.performance.inference.computeLibrary) }}
+                </strong>
+              </div>
+              <div>
+                <span>模型占用显存</span>
+                <strong>
+                  {{ monitorSnapshot.performance.inference.vramBytes
+                    ? formatMonitorBytes(monitorSnapshot.performance.inference.vramBytes)
+                    : '0 GB' }}
+                </strong>
+              </div>
+              <div>
+                <span>GPU 卸载层</span>
+                <strong v-if="monitorSnapshot.performance.inference.totalLayers">
+                  {{ monitorSnapshot.performance.inference.gpuLayers }} /
+                  {{ monitorSnapshot.performance.inference.totalLayers }} 层
+                </strong>
+                <strong v-else>等待模型加载</strong>
+              </div>
+              <div>
+                <span>运行模式</span>
+                <strong>
+                  {{ monitorSnapshot.performance.inference.offline ? '完全离线' : '标准模式' }}
+                </strong>
+              </div>
+            </div>
+
+            <div
+              v-if="monitorSnapshot.performance.modelOperation.active"
+              class="monitor-import-protection"
+              role="status"
+            >
+              <span></span>
+              <div>
+                <strong>模型仍在处理，请勿退出 ShotAI</strong>
+                <small>{{ monitorSnapshot.performance.modelOperation.status || '正在完成模型安装' }}</small>
+              </div>
+            </div>
+          </section>
+
           <section class="monitor-metrics" aria-label="主机性能">
             <article class="monitor-metric-card">
               <div class="monitor-metric-heading">
@@ -6599,6 +6819,10 @@ onBeforeUnmount(() => {
               <small v-if="monitorSnapshot.performance.gpu">
                 {{ monitorSnapshot.performance.gpu.name }} ·
                 {{ monitorSnapshot.performance.gpu.temperatureCelsius }}°C
+              </small>
+              <small v-if="monitorSnapshot.performance.gpu">
+                显存 {{ formatMonitorBytes(monitorSnapshot.performance.gpu.memoryUsedBytes) }} /
+                {{ formatMonitorBytes(monitorSnapshot.performance.gpu.memoryTotalBytes) }}
               </small>
               <small v-else>没有读取到 NVIDIA 显卡状态</small>
             </article>

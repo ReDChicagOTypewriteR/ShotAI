@@ -3,8 +3,8 @@
 Ubuntu 版提供与 Windows Electron 客户端相同的桌面窗口、系统托盘和 `9090`
 局域网入口。精简版默认生成两种文件：
 
-- `ShotAI-1.1.7-Ubuntu-22.04-x86_64.deb`：推荐在 Ubuntu 22.04 上安装；
-- `ShotAI-1.1.7-Ubuntu-22.04-x86_64.AppImage`：免安装运行和排错备用。
+- `ShotAI-1.1.9-Ubuntu-22.04-x86_64.deb`：推荐在 Ubuntu 22.04 上安装；
+- `ShotAI-1.1.9-Ubuntu-22.04-x86_64.AppImage`：免安装运行和排错备用。
 
 安装包包含 ShotAI 桌面客户端和网页服务，不包含模型权重、Ollama 或
 stable-diffusion.cpp。主机需要安装 Ollama；图片创作还需要单独准备 Linux 版
@@ -12,8 +12,8 @@ stable-diffusion.cpp。主机需要安装 Ollama；图片创作还需要单独�
 
 完整对话离线版使用以下文件名：
 
-- `ShotAI-1.1.7-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb`；
-- `ShotAI-1.1.7-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.AppImage`。
+- `ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb`；
+- `ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.AppImage`。
 
 完整包已经包含 Ollama v0.32.14、CUDA 12/13、CPU 和 Vulkan 运行库，目标机不需要
 另外下载 Ollama 或 CUDA Toolkit，但仍然需要可正常工作的 NVIDIA 驱动。模型文件
@@ -31,7 +31,7 @@ npm run build:ubuntu
 npm run build:ubuntu:full
 ```
 
-产物位于 `release/electron/`。推荐在 Ubuntu 22.04 x86_64 本机或同版本 CI 中
+产物位于 `release/ubuntu/`。推荐在 Ubuntu 22.04 x86_64 本机或同版本 CI 中
 完成最终发布构建；macOS 可以交叉生成 Linux 包，但仍需在真实 Ubuntu 主机进行
 安装、托盘、显卡和局域网验收。
 
@@ -46,7 +46,7 @@ npm run build:ubuntu:full
 命令行安装可作为稳定的备用方式：
 
 ```bash
-sudo apt install ./ShotAI-1.1.7-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb
+sudo apt install ./ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb
 shotai
 ```
 
@@ -59,16 +59,16 @@ shotai
 安装 DEB：
 
 ```bash
-cd release/electron
-sudo apt install ./ShotAI-1.1.7-Ubuntu-22.04-x86_64.deb
+cd release/ubuntu
+sudo apt install ./ShotAI-1.1.9-Ubuntu-22.04-x86_64.deb
 shotai
 ```
 
 使用 AppImage：
 
 ```bash
-chmod +x ShotAI-1.1.7-Ubuntu-22.04-x86_64.AppImage
-./ShotAI-1.1.7-Ubuntu-22.04-x86_64.AppImage
+chmod +x ShotAI-1.1.9-Ubuntu-22.04-x86_64.AppImage
+./ShotAI-1.1.9-Ubuntu-22.04-x86_64.AppImage
 ```
 
 若 AppImage 提示缺少 FUSE，执行 `sudo apt install libfuse2` 后重试；DEB 安装方式
@@ -89,8 +89,11 @@ sudo apt install libappindicator3-1 gnome-shell-extension-appindicator
 nvidia-smi
 ```
 
-使用完整离线版时不需要执行本节的 Ollama 安装命令。使用精简版时，安装并启动
-Linux x86_64 版 Ollama。ShotAI 会优先连接已经运行的
+使用完整离线版时不需要执行本节的 Ollama 安装命令。完整包会使用独立端口和
+独立模型目录，并在 Ubuntu 上固定优先使用 `cuda_v12`，兼容 Tesla V100 的
+Compute Capability 7.0；同时关闭云端请求，将默认上下文限制为 8K，避免两张
+V100 被自动配置成过大的 256K 上下文。使用精简版时，安装并启动 Linux x86_64
+版 Ollama。精简版会优先连接已经运行的
 `http://127.0.0.1:11434`；如果服务未运行但系统 PATH 中能找到 `ollama`，
 ShotAI 会以当前桌面用户启动它。不要把 Ollama 改成监听 `0.0.0.0`，局域网客户
 端统一通过 ShotAI 的 `/ollama/` 代理访问。
@@ -106,6 +109,10 @@ ollama pull qwen3-vl:8b-instruct-q4_K_M
 计算能力 7.0 的 V100，当前要求 NVIDIA 驱动 550 或更新版本。AMD Oland 卡可以继续
 负责桌面显示，两者不冲突。若机器有多张 V100，可通过 Ollama 服务的
 `CUDA_VISIBLE_DEVICES` 设置选择计算卡，优先使用 `nvidia-smi -L` 显示的 GPU UUID。
+
+主机监控会直接显示当前模型是 GPU 推理还是 CPU 推理、模型显存占用、CUDA 运行库
+和 GPU 卸载层数。仅看到“CUDA 12”表示运行库已经选择；必须同时看到“GPU 推理”
+以及非零显存，才能确认当前模型确实在 V100 上运行。
 
 参考：[Ollama Linux 安装](https://docs.ollama.com/linux)和
 [Ollama GPU 支持](https://docs.ollama.com/gpu)。
@@ -189,4 +196,24 @@ Ollama 和 Linux CUDA 库替换它们。
 7. 退出托盘程序，确认 9090 服务停止。
 
 日志和运行数据默认位于 `~/.config/ShotAI/data/`。启动失败时先查看
-`logs/desktop.log`，图片组件失败时查看 `logs/image-runtime.log`。
+`logs/desktop.log`，图片组件失败时查看 `logs/image-runtime.log`。从 1.1.8
+开始，模型校验、写入、创建或首次加载失败时，还会自动在 Ubuntu 桌面追加生成
+`ShotAI-model-import.log`，可以直接打开或复制给维护人员。
+
+从 1.1.9 开始，完整离线版会为内置 Ollama 动态选择 11435–11454 中的空闲端口，
+并固定使用 `~/.config/ShotAI/data/models/ollama/`。系统中原有的 11434 Ollama
+可以继续运行，但不会再污染 ShotAI 的模型列表。升级或重新安装会保留这个目录；
+需要全新状态时，在“模型管理”中点击“清空模型”。
+
+## 运行日志
+
+Ubuntu 版会持续记录桌面启动、Ollama、图片运行和模型导入失败信息：
+
+- DEB 安装后，从 `/opt/ShotAI/logs/` 查看；
+- AppImage 运行后，从 AppImage 文件旁的 `ShotAI-logs/` 查看；
+- 如果所在目录不可写，会自动回退到 Ubuntu 桌面的 `ShotAI-logs/`。
+
+多用户电脑会在日志文件名中加入 Linux 用户编号，避免互相覆盖。模型导入失败时，
+仍会额外在 Ubuntu 桌面生成 `ShotAI-model-import.log`。若模型导入被中断，下次启动
+会自动清理 Ollama 留下的 `COPY...` 转换临时文件；大于 8 GB 的模型在转换期间会
+显示“请勿退出”，从托盘退出时也会要求再次确认。

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1242" height="1660" viewBox="0 0 1242 1660">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07090b"/><stop offset="1" stop-color="#11171a"/></linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#74f7c5" stop-opacity="0"/><stop offset="0.5" stop-color="#74f7c5"/><stop offset="1" stop-color="#74f7c5" stop-opacity="0"/></linearGradient>
+    <pattern id="grid" width="54" height="54" patternUnits="userSpaceOnUse"><path d="M54 0H0V54" fill="none" stroke="#dce7e9" stroke-opacity="0.045"/></pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#000" flood-opacity="0.5"/></filter>
+  </defs>
+  <rect width="1242" height="1660" fill="url(#bg)"/>
+  <rect width="1242" height="1660" fill="url(#grid)"/>
+  <path d="M64 134H1178" stroke="#cfd8da" stroke-opacity="0.16"/>
+  <circle cx="1150" cy="72" r="6" fill="#74f7c5"/>
+  <text x="64" y="88" fill="#8d9a9f" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif" font-size="18px" font-weight="700" text-anchor="start" opacity="1"><tspan x="64" dy="0">08 / HONEST BETA</tspan></text>
+  <text x="64" y="258" fill="#f4f7f8" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif" font-size="90px" font-weight="800" text-anchor="start" opacity="1"><tspan x="64" dy="0">Beta 版本</tspan><tspan x="64" dy="103">适合可信局域网</tspan></text>
+  <text x="68" y="487" fill="#aeb9bc" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif" font-size="26px" font-weight="500" text-anchor="start" opacity="1"><tspan x="68" dy="0">没有账号、HTTPS、审计日志和多人任务队列。</tspan><tspan x="68" dy="35">模型需要自己准备，不要把 9090 暴露到公网。</tspan></text>
+  <g filter="url(#shadow)"><rect x="100" y="720" width="1042" height="420" rx="22" fill="#0b0f12" stroke="#526067" stroke-width="2" opacity="1"/><text x="210" y="820" fill="#ffb0b0" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif" font-size="27px" font-weight="650" text-anchor="start" opacity="1"><tspan x="210" dy="0">没有账号 / HTTPS / 审计</tspan></text><circle cx="155" cy="810" r="6" fill="#ff8e8e"/><text x="210" y="892" fill="#dce5e7" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif" font-size="27px" font-weight="650" text-anchor="start" opacity="1"><tspan x="210" dy="0">记录默认保存在当前浏览器</tspan></text><circle cx="155" cy="882" r="6" fill="#74f7c5"/><text x="210" y="964" fill="#dce5e7" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif" font-size="27px" font-weight="650" text-anchor="start" opacity="1"><tspan x="210" dy="0">没有多人任务队列和显存配额</tspan></text><circle cx="155" cy="954" r="6" fill="#74f7c5"/><text x="210" y="1036" fill="#dce5e7" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif" font-size="27px" font-weight="650" text-anchor="start" opacity="1"><tspan x="210" dy="0">模型权重不随仓库提供</tspan></text><circle cx="155" cy="1026" r="6" fill="#74f7c5"/></g>
+  <rect x="64" y="1548" width="1114" height="2" fill="url(#accent)"/>
+  <text x="64" y="1598" fill="#849297" font-family="-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif" font-size="18px" font-weight="600" text-anchor="start" opacity="1"><tspan x="64" dy="0">把边界写清楚，比把它叫“AI 神器”更重要</tspan></text>
+</svg>

@@ -3,7 +3,7 @@
   "productName": "ShotAI",
   "desktopName": "ShotAI",
   "private": true,
-  "version": "1.1.7",
+  "version": "1.1.9",
   "description": "ShotAI 本地与内网 AI 工作台",
   "author": "ShotAI",
   "main": "desktop/electron/main.cjs",
@@ -39,10 +39,10 @@
     "build": "vue-tsc -b && vite build",
     "electron:start": "electron .",
     "electron:dev": "npm run build && npm run check:electron && electron .",
-    "electron:pack:win": "npm run build && npm run check:electron && electron-builder --win nsis --x64",
+    "electron:pack:win": "npm run build && npm run check:electron && electron-builder --config desktop/electron/electron-builder.windows.cjs --win nsis --x64",
     "electron:pack:win:chat": "npm run build && npm run check:electron && electron-builder --config desktop/electron/electron-builder.chat.cjs --win nsis --x64",
     "electron:pack:win:full": "npm run build && npm run check:electron && electron-builder --config desktop/electron/electron-builder.full.cjs --win nsis --x64 && npm run check:electron-full",
-    "electron:pack:ubuntu": "npm run build && npm run check:electron && npm run check:ubuntu-package && electron-builder --linux AppImage deb --x64",
+    "electron:pack:ubuntu": "npm run build && npm run check:electron && npm run check:ubuntu-package && electron-builder --config desktop/electron/electron-builder.ubuntu.cjs --linux AppImage deb --x64",
     "electron:pack:ubuntu:full": "npm run build && npm run check:electron && npm run check:ubuntu-package && npm run check:ubuntu-full && electron-builder --config desktop/electron/electron-builder.ubuntu-full.cjs --linux AppImage deb --x64",
     "build:win": "npm run electron:pack:win",
     "build:ubuntu": "npm run electron:pack:ubuntu",
@@ -154,6 +154,7 @@
     "deb": {
       "packageCategory": "utils",
       "priority": "optional",
+      "afterInstall": "desktop/electron/after-install-linux.sh",
       "recommends": [
         "libappindicator3-1"
       ]

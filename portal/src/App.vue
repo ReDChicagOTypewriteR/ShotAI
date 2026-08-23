@@ -8,6 +8,13 @@ const workbenchUrl = configuredWorkbenchUrl || '#workflow'
 const workbenchTarget = configuredWorkbenchUrl ? '_blank' : undefined
 const workbenchLabel = configuredWorkbenchUrl ? '打开工作台' : '查看部署方式'
 const productPreviewUrl = `${import.meta.env.BASE_URL}shotai-product-preview.png`
+const githubUrl = 'https://github.com/ReDChicagOTypewriteR/ShotAI'
+const configuredDocsUrl = import.meta.env.VITE_DOCS_URL?.trim() || ''
+const docsUrl =
+  configuredDocsUrl ||
+  (import.meta.env.DEV ? 'http://127.0.0.1:5175/docs/guide/' : './docs/guide/')
+const docsTarget = configuredDocsUrl || import.meta.env.DEV ? '_blank' : undefined
+const docsRel = docsTarget ? 'noopener noreferrer' : undefined
 
 function handleScroll() {
   headerCompact.value = window.scrollY > 24
@@ -58,6 +65,33 @@ onBeforeUnmount(() => {
         <a href="#capabilities" @click="closeMenu">能力</a>
         <a href="#workflow" @click="closeMenu">流程</a>
         <a href="#lan" @click="closeMenu">多人使用</a>
+        <a
+          class="docs-link"
+          :href="docsUrl"
+          :target="docsTarget"
+          :rel="docsRel"
+          aria-label="打开 ShotAI 使用文档"
+          @click="closeMenu"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5v-16Z" />
+            <path d="M4 5.5A2.5 2.5 0 0 1 6.5 8H20M8 12h8M8 15h6" />
+          </svg>
+          文档
+        </a>
+        <a
+          class="github-link"
+          :href="githubUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="在 GitHub 查看 ShotAI 项目（新窗口）"
+          @click="closeMenu"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2C6.48 2 2 6.59 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.09.68-.22.68-.49v-1.92c-2.78.62-3.37-1.21-3.37-1.21-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.66.35-1.12.63-1.38-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 6.96a9.3 9.3 0 0 1 2.5.35c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.8-4.57 5.06.36.32.68.94.68 1.89v2.81c0 .27.18.59.69.49A10.24 10.24 0 0 0 22 12.25C22 6.59 17.52 2 12 2Z" />
+          </svg>
+          GitHub
+        </a>
       </nav>
 
       <a
@@ -84,10 +118,10 @@ onBeforeUnmount(() => {
             <span class="live-dot"></span>
             SHOTAI 1.1.3 · WINDOWS 客户端 · 完全离线
           </div>
-          <h1>本地 AI，<br /><span>现在也会创作</span></h1>
+          <h1>在断网的孤岛中，<br /><span>我们仍能对话</span></h1>
           <p class="hero-lead">
-            在一台 Windows 电脑上完成对话、看图、读文档、资料问答与图片创作。
-            支持参考图修改，其他电脑打开浏览器也能共享同一套本地能力。
+            当网络离开工作现场，ShotAI 让知识、对话与创作仍然留在身边。
+            在一台 Windows 电脑上运行，其他电脑打开浏览器即可继续工作。
           </p>
           <div class="hero-actions">
             <a
@@ -594,7 +628,21 @@ onBeforeUnmount(() => {
         <small>完全离线的智能助手</small>
       </a>
       <p>本地对话、资料问答与图片创作工作台</p>
-      <div><span>SHOTAI 1.1.3</span><span>© 2026 SHOTAI</span></div>
+      <div>
+        <a
+          class="github-footer-link"
+          :href="githubUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="访问 ShotAI GitHub 项目（新窗口）"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2C6.48 2 2 6.59 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.09.68-.22.68-.49v-1.92c-2.78.62-3.37-1.21-3.37-1.21-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.57 2.34 1.12 2.91.86.09-.66.35-1.12.63-1.38-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 6.96a9.3 9.3 0 0 1 2.5.35c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.8-4.57 5.06.36.32.68.94.68 1.89v2.81c0 .27.18.59.69.49A10.24 10.24 0 0 0 22 12.25C22 6.59 17.52 2 12 2Z" />
+          </svg>
+          GitHub
+        </a>
+        <span>SHOTAI 1.1.3</span><span>© 2026 SHOTAI</span>
+      </div>
     </footer>
   </div>
 </template>

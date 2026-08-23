@@ -5,8 +5,15 @@ import { chromium } from 'playwright-core'
 const projectDirectory = resolve(import.meta.dirname, '..')
 const appUrl = process.env.SHOTAI_TEST_URL || 'http://127.0.0.1:5173'
 const builtHtml = readFileSync(resolve(projectDirectory, 'dist/index.html'), 'utf8')
+const ollamaServiceSource = readFileSync(
+  resolve(projectDirectory, 'src/services/ollama.ts'),
+  'utf8',
+)
 if (/import\.meta\.resolve/.test(builtHtml) || /type=["']module["']/.test(builtHtml)) {
   throw new Error('legacy-compatible build still contains the modern browser probe')
+}
+if (!ollamaServiceSource.includes('SHOTAI_OK')) {
+  throw new Error('model import is missing the instruction-following self-test')
 }
 
 function createMetadataFreeGguf() {
@@ -86,6 +93,7 @@ try {
         metadataFreeImageGgufAccepted: true,
         duplicateFileReuseExplained: true,
         modelCacheCleanupVisible: true,
+        chatInstructionSelfTest: true,
       },
       null,
       2,

@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const projectDirectory = new URL('..', import.meta.url).pathname
 const testDirectory = await mkdtemp(join(tmpdir(), 'shotai-v1-server-'))
 const port = 19090 + Math.floor(Math.random() * 500)
+const modelImportLogPath = join(testDirectory, 'Desktop', 'ShotAI-model-import.log')
 let server
 
 async function waitForServer() {
@@ -45,6 +46,10 @@ try {
   server = spawn(process.execPath, ['server.mjs'], {
     cwd: testDirectory,
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      SHOTAI_MODEL_IMPORT_LOG_PATH: modelImportLogPath,
+    },
   })
   server.stdout.on('data', (chunk) => process.stdout.write(chunk))
   server.stderr.on('data', (chunk) => process.stderr.write(chunk))
@@ -53,6 +58,10 @@ try {
   assert.equal(system.platform, process.platform)
   assert.equal(system.canManage, true)
   assert.equal(system.isHost, true)
+  assert.equal(system.apiVersion, 2)
+  assert.equal(system.ollama.source, 'external')
+  assert.ok(system.ollama.modelDirectory)
+  assert.ok(system.logs.directory)
 
   const modelName = 'shotai-v1-test.gguf'
   const upload = await fetch(
@@ -82,6 +91,26 @@ try {
   ).then((response) => response.json())
   assert.equal(restart.restartRequired, true)
 
+  const importFailure = await fetch(
+    `http://127.0.0.1:${port}/shotai/model-import-log`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'chat',
+        stage: '首次加载测试',
+        modelName: 'deepseek-test',
+        files: [{ name: 'deepseek-test.gguf', size: 12345 }],
+        error: 'unknown model architecture',
+      }),
+    },
+  )
+  assert.equal(importFailure.status, 201)
+  const importLog = await readFile(modelImportLogPath, 'utf8')
+  assert.match(importLog, /Stage: 首次加载测试/)
+  assert.match(importLog, /deepseek-test\.gguf/)
+  assert.match(importLog, /unknown model architecture/)
+
   console.log(
     JSON.stringify(
       {
@@ -92,6 +121,9 @@ try {
         streamedImageModelUpload: true,
         imageModelDelete: true,
         safeRestartInstruction: true,
+        desktopImportFailureLog: true,
+        ollamaRuntimeReported: true,
+        runtimeLogDirectoryReported: true,
       },
       null,
       2,

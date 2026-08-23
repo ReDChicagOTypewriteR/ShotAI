@@ -182,6 +182,28 @@ svg {
   transform-origin: left;
 }
 
+.github-link {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 7px;
+}
+
+.docs-link {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 7px;
+}
+
+.github-link svg,
+.docs-link svg,
+.github-footer-link svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  fill: currentColor;
+  stroke: none;
+}
+
 .header-cta {
   display: flex;
   min-height: 44px;
@@ -1860,11 +1882,26 @@ footer p {
 footer > div {
   display: flex;
   justify-self: end;
+  align-items: center;
   gap: 24px;
   color: var(--muted);
   font-family: var(--mono);
   font-size: 7px;
   letter-spacing: 0.09em;
+}
+
+.github-footer-link {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 7px;
+  color: var(--secondary);
+  transition: color 180ms ease;
+}
+
+.github-footer-link:hover,
+.github-footer-link:focus-visible {
+  color: var(--text);
 }
 
 a:focus-visible,

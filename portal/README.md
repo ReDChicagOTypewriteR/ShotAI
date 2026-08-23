@@ -20,8 +20,17 @@ npm run dev
 npm run build
 ```
 
-构建后会生成 `dist/index.html` 和产品预览图片。JavaScript 与 CSS 已内联
-到 HTML 中，将整个 `dist` 目录上传到 Nginx、Apache、IIS 或静态托管目录即可。
+构建后会生成 `dist/index.html`、产品预览图片和 `dist/docs/` VitePress 文档站。
+JavaScript 与 CSS 已内联到 HTML 中，将整个 `dist` 目录上传到 Nginx、Apache、IIS
+或静态托管目录即可。
+
+本地单独运行文档站：
+
+```bash
+npm run docs:dev
+```
+
+默认地址：`http://127.0.0.1:5175/docs/`
 
 需要生成独立交付目录时执行：
 
@@ -36,6 +45,7 @@ npm run package:static
 ```text
 dist/
 ├── index.html
+├── docs/
 └── shotai-product-preview.png
 ```
 

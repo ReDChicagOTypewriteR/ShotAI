@@ -8,7 +8,7 @@ const projectDirectory = dirname(dirname(fileURLToPath(import.meta.url)))
 const unpackedDirectory = join(
   projectDirectory,
   'release',
-  'electron',
+  'windows',
   'win-unpacked',
 )
 

@@ -67,6 +67,15 @@ interface OllamaChatChunk {
   error?: string
 }
 
+interface OllamaChatResponse {
+  message?: {
+    role?: 'assistant'
+    content?: string
+    thinking?: string
+  }
+  response?: string
+}
+
 interface OllamaImageChunk {
   image?: string
   completed?: number
@@ -538,16 +547,60 @@ export async function createOllamaModel(
 }
 
 export async function testOllamaModel(model: string) {
-  await requestJson('/chat', {
-    method: 'POST',
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'user', content: '请仅回复：OK' }],
-      stream: false,
-      keep_alive: '2m',
-      options: { num_predict: 8 },
-    }),
+  const marker = 'SHOTAI_OK'
+  const requestBody = (includeThink: boolean) => ({
+    model,
+    messages: [
+      {
+        role: 'system',
+        content: `你正在进行模型可用性检查。忽略其他内容，只回复英文标记 ${marker}，不要解释。`,
+      },
+      {
+        role: 'user',
+        content: `请严格回复：${marker}`,
+      },
+    ],
+    stream: false,
+    keep_alive: '2m',
+    ...(includeThink ? { think: false } : {}),
+    options: {
+      temperature: 0,
+      top_p: 0.1,
+      num_ctx: 2048,
+      num_predict: 128,
+    },
   })
+
+  let result: OllamaChatResponse
+  try {
+    result = await requestJson<OllamaChatResponse>('/chat', {
+      method: 'POST',
+      body: JSON.stringify(requestBody(true)),
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (!/(?:think|thinking)/i.test(message)) throw error
+    result = await requestJson<OllamaChatResponse>('/chat', {
+      method: 'POST',
+      body: JSON.stringify(requestBody(false)),
+    })
+  }
+
+  const output = [
+    result.message?.thinking,
+    result.message?.content,
+    result.response,
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+  if (!output.toUpperCase().includes(marker)) {
+    const preview = output.replace(/\s+/g, ' ').slice(0, 300) || '没有返回文字'
+    throw new OllamaApiError(
+      `模型能够载入，但没有遵循最基本的对话指令。它可能不是聊天模型、聊天模板不兼容，或 GGUF 文件有误。实际返回：${preview}`,
+    )
+  }
+  return output
 }
 
 export function normalizeOllamaModelName(value: string) {

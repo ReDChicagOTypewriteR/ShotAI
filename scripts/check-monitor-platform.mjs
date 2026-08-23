@@ -32,6 +32,11 @@ async function waitUntilReady() {
 try {
   await waitUntilReady()
 
+  const wrongMethod = await fetch(`http://127.0.0.1:${port}/shotai/monitor/login`)
+  assert.equal(wrongMethod.status, 405)
+  assert.equal(wrongMethod.headers.get('allow'), 'POST')
+  assert.equal(wrongMethod.headers.get('x-shotai-api-version'), '2')
+
   const anonymous = await fetch(`http://127.0.0.1:${port}/shotai/monitor/snapshot`)
   assert.equal(anonymous.status, 401)
 
@@ -60,14 +65,28 @@ try {
   const snapshot = await snapshotResponse.json()
   assert.ok(snapshot.performance.cpu.cores > 0)
   assert.ok(snapshot.performance.memory.totalBytes > 0)
+  assert.ok(snapshot.performance.inference)
+  assert.ok(['idle', 'importing', 'running', 'unavailable'].includes(
+    snapshot.performance.inference.state,
+  ))
+  assert.equal(typeof snapshot.performance.modelOperation.active, 'boolean')
   assert.ok(Array.isArray(snapshot.clients))
 
   const source = await readFile(join(projectDirectory, 'src', 'App.vue'), 'utf8')
   assert.match(source, /主机监控/)
   assert.match(source, /monitorHideIps/)
   assert.match(source, /monitorChartPoints/)
+  assert.match(source, /AI 运行方式/)
+  assert.match(source, /GPU 卸载层/)
 
-  console.log(JSON.stringify({ monitorPlatform: true, hostOnly: true, authenticated: true }))
+  console.log(JSON.stringify({
+    monitorPlatform: true,
+    hostOnly: true,
+    authenticated: true,
+    methodMismatchExplained: true,
+    inferenceBackendReported: true,
+    modelImportProtectionReported: true,
+  }))
 } finally {
   child.kill('SIGTERM')
 }

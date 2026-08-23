@@ -10,7 +10,7 @@
 
 <p align="center">
   <img alt="Build verified" src="https://img.shields.io/badge/build-verified-2ea44f?style=flat&amp;logo=githubactions&amp;logoColor=white" />
-  <img alt="Version 1.1.8" src="https://img.shields.io/badge/version-v1.1.8-2496ed?style=flat" />
+  <img alt="Version 1.1.9" src="https://img.shields.io/badge/version-v1.1.9-2496ed?style=flat" />
   <img alt="Vue 3.5.40" src="https://img.shields.io/badge/Vue-3.5.40-42b883?style=flat&amp;logo=vuedotjs&amp;logoColor=white" />
   <img alt="Electron 43.2.0" src="https://img.shields.io/badge/Electron-43.2.0-47848f?style=flat&amp;logo=electron&amp;logoColor=white" />
   <img alt="TypeScript 5.9.3" src="https://img.shields.io/badge/TypeScript-5.9.3-3178c6?style=flat&amp;logo=typescript&amp;logoColor=white" />

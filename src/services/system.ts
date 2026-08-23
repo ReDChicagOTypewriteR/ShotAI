@@ -1,14 +1,36 @@
 export interface ShotAISystemInfo {
   version: string
+  apiVersion: number
   platform: string
   isHost: boolean
   canManage: boolean
   port: number
+  ollama: {
+    source: 'embedded' | 'managed' | 'external' | 'unavailable'
+    endpoint: string
+    modelDirectory: string
+    pid?: number
+    isolated: boolean
+    systemOllamaDetected: boolean
+    computeLibrary?: string
+    offline?: boolean
+  }
+  logs: {
+    directory: string
+  }
 }
 
 export interface ModelCacheCleanupResult {
   removedFiles: number
   removedBytes: number
+}
+
+export interface ModelImportFailureReport {
+  mode: 'chat' | 'image'
+  stage: string
+  modelName: string
+  error: string
+  files: Array<{ name: string; size: number }>
 }
 
 export interface MonitorClient {
@@ -36,10 +58,39 @@ export interface MonitorSnapshot {
     disk: null | { usedBytes: number; totalBytes: number; usagePercent: number }
     gpu: null | {
       name: string
+      deviceCount: number
       usagePercent: number
       memoryUsedBytes: number
       memoryTotalBytes: number
       temperatureCelsius: number
+      devices?: Array<{
+        index: number
+        name: string
+        usagePercent: number
+        memoryUsedBytes: number
+        memoryTotalBytes: number
+        temperatureCelsius: number
+      }>
+    }
+    inference: {
+      state: 'idle' | 'importing' | 'running' | 'unavailable'
+      backend: 'idle' | 'gpu' | 'cpu' | 'unknown'
+      model: string
+      modelBytes: number
+      vramBytes: number
+      contextLength: number
+      gpuLayers: number
+      totalLayers: number
+      computeLibrary: string
+      offline: boolean
+    }
+    modelOperation: {
+      active: boolean
+      stage: string
+      status: string
+      startedAt: number
+      transferredBytes: number
+      totalBytes: number
     }
     process: { memoryBytes: number; requestCount: number }
   }
@@ -53,6 +104,10 @@ async function parseSystemResponse<T>(response: Response, fallback: string): Pro
       message = (JSON.parse(text) as { error?: string }).error || fallback
     } catch {
       // Keep the friendly fallback for an empty or non-JSON response.
+    }
+    if (response.status === 405) {
+      const serverVersion = response.headers.get('X-ShotAI-Version')
+      message = `监控页面与主机服务的方法不匹配${serverVersion ? `（主机服务 ${serverVersion}）` : ''}。请从系统托盘完全退出旧版 ShotAI，再启动当前版本。`
     }
     throw new Error(message)
   }
@@ -101,10 +156,23 @@ const localHosts = new Set(['localhost', '127.0.0.1', '::1'])
 
 const fallbackInfo: ShotAISystemInfo = {
   version: '1.0.0',
+  apiVersion: 1,
   platform: 'unknown',
   isHost: localHosts.has(window.location.hostname),
   canManage: localHosts.has(window.location.hostname),
   port: Number(window.location.port || 9090),
+  ollama: {
+    source: 'external',
+    endpoint: 'http://127.0.0.1:11434',
+    modelDirectory: '由外部 Ollama 管理',
+    isolated: false,
+    systemOllamaDetected: false,
+    computeLibrary: '',
+    offline: false,
+  },
+  logs: {
+    directory: 'data/logs',
+  },
 }
 
 export async function getShotAISystemInfo(): Promise<ShotAISystemInfo> {
@@ -142,4 +210,16 @@ export async function cleanupModelCache(): Promise<ModelCacheCleanupResult> {
     throw new Error(message)
   }
   return JSON.parse(body) as ModelCacheCleanupResult
+}
+
+export async function writeModelImportFailureLog(
+  report: ModelImportFailureReport,
+): Promise<{ saved: boolean; path: string }> {
+  const response = await fetch('/shotai/model-import-log', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(report),
+  })
+  return parseSystemResponse(response, '模型导入日志写入失败')
 }

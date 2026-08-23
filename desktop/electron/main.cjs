@@ -8,6 +8,7 @@ const {
   shell,
 } = require('electron')
 const { spawn, spawnSync } = require('node:child_process')
+const { createServer: createNetServer } = require('node:net')
 const {
   appendFileSync,
   closeSync,
@@ -17,6 +18,7 @@ const {
   readFileSync,
   readdirSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } = require('node:fs')
 const { networkInterfaces } = require('node:os')
@@ -34,9 +36,23 @@ let imageProcess = null
 let quitting = false
 let dataRoot = ''
 let logPath = ''
+let runtimeLogDirectory = ''
 let config = null
 let serverReady = false
+let forceQuit = false
+let quitPromptOpen = false
+let shutdownStarted = false
 const openLogFiles = []
+const ollamaRuntimeState = {
+  source: 'unavailable',
+  endpoint: '',
+  pid: 0,
+  modelDirectory: '',
+  isolated: false,
+  systemOllamaDetected: false,
+  computeLibrary: '',
+  offline: false,
+}
 const imageRuntimeState = {
   state: 'idle',
   error: '',
@@ -44,13 +60,51 @@ const imageRuntimeState = {
 }
 globalThis.__shotaiImageRuntimeState = imageRuntimeState
 
-if (!app.requestSingleInstanceLock()) {
+if (!app.requestSingleInstanceLock({ version: app.getVersion() })) {
   app.quit()
 }
 
 function ensureDirectory(path) {
   mkdirSync(path, { recursive: true })
   return path
+}
+
+function runtimeLogFile(name) {
+  if (!runtimeLogDirectory) return join(dataRoot, 'logs', name)
+  if (process.platform !== 'linux' || !app.isPackaged) {
+    return join(runtimeLogDirectory, name)
+  }
+  const userId = typeof process.getuid === 'function' ? process.getuid() : 'user'
+  const extension = extname(name)
+  const stem = extension ? name.slice(0, -extension.length) : name
+  return join(runtimeLogDirectory, `${stem}-${userId}${extension}`)
+}
+
+function prepareRuntimeLogDirectory() {
+  const candidates = []
+  if (process.platform === 'linux' && app.isPackaged) {
+    if (process.env.APPIMAGE) {
+      candidates.push(join(dirname(resolve(process.env.APPIMAGE)), 'ShotAI-logs'))
+    } else {
+      candidates.push(join(dirname(process.execPath), 'logs'))
+    }
+    candidates.push(join(app.getPath('desktop'), 'ShotAI-logs'))
+  }
+  candidates.push(join(dataRoot, 'logs'))
+
+  for (const directory of [...new Set(candidates)]) {
+    const probePath = join(directory, `.shotai-write-test-${process.pid}`)
+    try {
+      ensureDirectory(directory)
+      const descriptor = openSync(probePath, 'a')
+      closeSync(descriptor)
+      unlinkSync(probePath)
+      return directory
+    } catch {
+      // Try the next writable location.
+    }
+  }
+  return join(dataRoot, 'logs')
 }
 
 function log(message) {
@@ -135,15 +189,107 @@ async function endpointOnline(url, timeout = 2_000) {
   }
 }
 
+function portAvailable(port) {
+  return new Promise((resolvePort) => {
+    const probe = createNetServer()
+    probe.unref()
+    probe.once('error', () => resolvePort(false))
+    probe.listen({ host: '127.0.0.1', port, exclusive: true }, () => {
+      probe.close(() => resolvePort(true))
+    })
+  })
+}
+
+async function findPrivateOllamaUrl() {
+  for (let port = 11435; port <= 11454; port += 1) {
+    if (await portAvailable(port)) return `http://127.0.0.1:${port}`
+  }
+  throw new Error('ShotAI 无法找到可用的独立 AI 服务端口（11435–11454）')
+}
+
+async function waitForEndpoint(url, child, timeout = CONTROL_TIMEOUT_MS) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    if (child?.exitCode !== null) {
+      throw new Error(`AI 服务启动后提前停止，代码：${child.exitCode}`)
+    }
+    if (await endpointOnline(url, 1_000)) return
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 250))
+  }
+  throw new Error('AI 服务启动超时，请查看 logs/ollama.log')
+}
+
 function openProcessLog(name) {
-  const descriptor = openSync(join(dataRoot, 'logs', name), 'a')
+  const descriptor = openSync(runtimeLogFile(name), 'a')
   openLogFiles.push(descriptor)
   return descriptor
 }
 
+function cleanupInterruptedOllamaCopies(modelDirectory) {
+  const blobDirectory = join(modelDirectory, 'blobs')
+  if (!existsSync(blobDirectory)) return { files: 0, bytes: 0 }
+  let files = 0
+  let bytes = 0
+  for (const entry of readdirSync(blobDirectory, { withFileTypes: true })) {
+    if (!entry.isFile() || !/^COPY\d+$/i.test(entry.name)) continue
+    const path = join(blobDirectory, entry.name)
+    try {
+      bytes += statSync(path).size
+      unlinkSync(path)
+      files += 1
+    } catch (error) {
+      log(`未能清理中断的模型临时文件 ${entry.name}：${error.message}`)
+    }
+  }
+  if (files > 0) {
+    log(`已清理 ${files} 个中断的模型转换临时文件，共 ${Math.round(bytes / 1024 / 1024)} MiB。`)
+  }
+  return { files, bytes }
+}
+
+function bundledCudaLibrary(executable, libraryName) {
+  if (!executable || !existsSync(executable)) return ''
+  const library = join(
+    dirname(dirname(executable)),
+    'lib',
+    'ollama',
+    libraryName,
+    process.platform === 'win32' ? 'ggml-cuda.dll' : 'libggml-cuda.so',
+  )
+  return existsSync(library) ? libraryName : ''
+}
+
 async function startOllama() {
+  const executable = findExecutable('ollama', 'ollama')
+  const isBundledOllama = Boolean(
+    executable && executable !== 'ollama' && executable !== 'ollama.exe',
+  )
+  const shotAIModelDirectory = join(dataRoot, 'models', 'ollama')
+  ollamaRuntimeState.systemOllamaDetected = await endpointOnline(
+    'http://127.0.0.1:11434/api/version',
+  )
+
+  // A separately installed Ollama often owns 11434 and may expose an unrelated
+  // model store. The full package must use its own model directory and endpoint.
+  // Keep the system Ollama available on 11434, but never mix its models into ShotAI.
+  if (isBundledOllama) {
+    config.ollamaUrl = await findPrivateOllamaUrl()
+    Object.assign(ollamaRuntimeState, {
+      source: 'embedded',
+      endpoint: config.ollamaUrl,
+      modelDirectory: shotAIModelDirectory,
+      isolated: true,
+    })
+    log(
+      `发现内置 Ollama。ShotAI 使用独立服务 ${config.ollamaUrl} 和独立模型目录 ${shotAIModelDirectory}。`,
+    )
+    if (ollamaRuntimeState.systemOllamaDetected) {
+      log('同时检测到系统 Ollama（127.0.0.1:11434），已隔离，不会读取它的模型。')
+    }
+  }
+
   const versionUrl = new URL('/api/version', config.ollamaUrl).toString()
-  if (await endpointOnline(versionUrl)) {
+  if (!isBundledOllama && await endpointOnline(versionUrl)) {
     let version = '未知版本'
     try {
       const response = await fetch(versionUrl)
@@ -153,33 +299,72 @@ async function startOllama() {
       // The service is online; version details are diagnostic only.
     }
     log(
-      `检测到已经运行的 Ollama（${version}，${config.ollamaUrl}）。将使用这个服务，内置 Ollama 不会重复启动。`,
+      `检测到已经运行的 Ollama（${version}，${config.ollamaUrl}）。`,
     )
+    Object.assign(ollamaRuntimeState, {
+      source: 'external',
+      endpoint: config.ollamaUrl,
+      modelDirectory: '由外部 Ollama 管理',
+      isolated: false,
+    })
     return
   }
-  const executable = findExecutable('ollama', 'ollama')
   if (!executable) {
+    ollamaRuntimeState.endpoint = config.ollamaUrl
     log('未找到 Ollama，工作台仍会启动。')
     return
   }
   const output = openProcessLog('ollama.log')
   try {
-    ollamaProcess = spawn(executable, ['serve'], {
+    cleanupInterruptedOllamaCopies(shotAIModelDirectory)
+    const preferredComputeLibrary =
+      process.platform === 'linux' && isBundledOllama
+        ? bundledCudaLibrary(executable, 'cuda_v12')
+        : ''
+    Object.assign(ollamaRuntimeState, {
+      computeLibrary: preferredComputeLibrary,
+      offline: isBundledOllama,
+    })
+    if (preferredComputeLibrary) {
+      log('Ubuntu 离线包已固定使用 CUDA 12 运行库，以兼容 Tesla V100（Compute Capability 7.0）。')
+    }
+    const child = spawn(executable, ['serve'], {
       cwd: existsSync(executable) ? dirname(executable) : undefined,
       windowsHide: true,
+      detached: process.platform !== 'win32',
       stdio: ['ignore', output, output],
       env: {
         ...process.env,
-        OLLAMA_HOST: '127.0.0.1:11434',
-        OLLAMA_MODELS: join(dataRoot, 'models', 'ollama'),
+        OLLAMA_HOST: new URL(config.ollamaUrl).host,
+        OLLAMA_MODELS: shotAIModelDirectory,
+        ...(isBundledOllama
+          ? {
+              OLLAMA_NO_CLOUD: 'true',
+              OLLAMA_CONTEXT_LENGTH: process.env.OLLAMA_CONTEXT_LENGTH || '8192',
+            }
+          : {}),
+        ...(preferredComputeLibrary
+          ? { OLLAMA_LLM_LIBRARY: preferredComputeLibrary }
+          : {}),
       },
     })
-    ollamaProcess.on('error', (error) => log(`Ollama 启动失败：${error.message}`))
-    ollamaProcess.on('exit', (code) => log(`Ollama 已停止，代码：${code}`))
-    log(`Ollama 已启动：${executable}`)
+    ollamaProcess = child
+    Object.assign(ollamaRuntimeState, {
+      source: isBundledOllama ? 'embedded' : 'managed',
+      endpoint: config.ollamaUrl,
+      pid: child.pid || 0,
+      modelDirectory: shotAIModelDirectory,
+      isolated: isBundledOllama,
+    })
+    child.on('error', (error) => log(`Ollama 启动失败：${error.message}`))
+    child.on('exit', (code) => log(`Ollama 已停止，代码：${code}`))
+    await waitForEndpoint(versionUrl, child)
+    log(`Ollama 已启动：${executable}（PID ${child.pid || '未知'}）`)
   } catch (error) {
+    stopProcess(ollamaProcess)
     ollamaProcess = null
     log(`Ollama 启动失败：${error.message}`)
+    if (isBundledOllama) throw error
   }
 }
 
@@ -210,7 +395,7 @@ function selectImageArguments() {
 
   if (!full && !diffusion) {
     const isComponent = (file) =>
-      /qwen|text.?encoder|clip|t5|vae|(?:^|[-_.])ae(?:[-_.]|$)/i.test(file.name)
+      /qwen|text.?encoder|full.?encoder.?small.?decoder|clip|t5|vae|(?:^|[-_.])ae(?:[-_.]|$)/i.test(file.name)
     diffusion = files.find(
       (file) =>
         /flux.?2.*klein|z.?image.*turbo/i.test(file.name) &&
@@ -227,7 +412,7 @@ function selectImageArguments() {
       )?.path || ''
       vae = files.find(
         (file) =>
-          /flux.?2.*vae|(?:^|[-_.])vae(?:[-_.]|$)|(?:^|[-_.])ae(?:[-_.]|$)/i.test(file.name) ||
+          /full.?encoder.?small.?decoder|flux.?2.*vae|(?:^|[-_.])vae(?:[-_.]|$)|(?:^|[-_.])ae(?:[-_.]|$)/i.test(file.name) ||
           (file.name === 'diffusion_pytorch_model.safetensors' &&
             file.size < 1_000_000_000),
       )?.path || ''
@@ -334,7 +519,13 @@ function stopProcess(child) {
       stdio: 'ignore',
     })
   } else {
-    child.kill('SIGTERM')
+    try {
+      // Managed runtimes are placed in their own process group so helper
+      // processes such as llama-quantize cannot survive a normal ShotAI exit.
+      process.kill(-child.pid, 'SIGTERM')
+    } catch {
+      child.kill('SIGTERM')
+    }
   }
 }
 
@@ -352,12 +543,27 @@ function serverEnvironment(configPath) {
     ...process.env,
     SHOTAI_EMBEDDED: '1',
     SHOTAI_CONFIG_PATH: configPath,
+    SHOTAI_OLLAMA_URL: config.ollamaUrl,
+    SHOTAI_OLLAMA_SOURCE: ollamaRuntimeState.source,
+    SHOTAI_OLLAMA_PID: String(ollamaRuntimeState.pid || ''),
+    SHOTAI_OLLAMA_MODEL_DIRECTORY: ollamaRuntimeState.modelDirectory,
+    SHOTAI_OLLAMA_ISOLATED: ollamaRuntimeState.isolated ? '1' : '0',
+    SHOTAI_OLLAMA_COMPUTE_LIBRARY: ollamaRuntimeState.computeLibrary,
+    SHOTAI_OLLAMA_OFFLINE: ollamaRuntimeState.offline ? '1' : '0',
+    SHOTAI_OLLAMA_LOG_PATH: runtimeLogFile('ollama.log'),
+    SHOTAI_SYSTEM_OLLAMA_DETECTED: ollamaRuntimeState.systemOllamaDetected ? '1' : '0',
     SHOTAI_DATA_ROOT: dataRoot,
     SHOTAI_WEB_ROOT: app.isPackaged
       ? join(process.resourcesPath, 'shotai', 'web')
       : join(app.getAppPath(), 'dist'),
     SHOTAI_IMAGE_MODEL_DIRECTORY: join(dataRoot, 'models', 'image'),
     SHOTAI_IMAGE_RUNTIME_DIRECTORY: runtimeDirectory,
+    SHOTAI_LOG_DIRECTORY: runtimeLogDirectory,
+    SHOTAI_INSTALL_MODEL_IMPORT_LOG_PATH: runtimeLogFile('model-import.log'),
+    SHOTAI_MODEL_IMPORT_LOG_PATH: join(
+      app.getPath('desktop'),
+      'ShotAI-model-import.log',
+    ),
     SHOTAI_VERSION: app.getVersion(),
   }
 }
@@ -366,6 +572,20 @@ async function startLanServer(configPath) {
   const script = app.isPackaged
     ? join(process.resourcesPath, 'shotai', 'server', 'serve-lan.mjs')
     : join(app.getAppPath(), 'scripts', 'serve-lan.mjs')
+  const statusUrl = `http://127.0.0.1:${config.port}/shotai/system`
+  if (await endpointOnline(statusUrl)) {
+    let occupiedBy = '另一个程序'
+    try {
+      const response = await fetch(statusUrl)
+      const body = await response.json()
+      if (body?.version) occupiedBy = `仍在运行的 ShotAI ${body.version}`
+    } catch {
+      // The occupied port may not belong to ShotAI.
+    }
+    throw new Error(
+      `端口 ${config.port} 已被${occupiedBy}占用。请先从托盘退出旧版 ShotAI，再启动当前版本。`,
+    )
+  }
   Object.assign(process.env, serverEnvironment(configPath))
   globalThis.__shotaiLanServer = null
   globalThis.__shotaiLanServerError = null
@@ -374,7 +594,6 @@ async function startLanServer(configPath) {
 
   await import(pathToFileURL(script).href)
   const deadline = Date.now() + CONTROL_TIMEOUT_MS
-  const statusUrl = `http://127.0.0.1:${config.port}/shotai/system`
   while (Date.now() < deadline) {
     if (globalThis.__shotaiLanServerError) {
       throw globalThis.__shotaiLanServerError
@@ -470,7 +689,6 @@ function createTray() {
       {
         label: '退出 ShotAI',
         click: () => {
-          quitting = true
           app.quit()
         },
       },
@@ -480,6 +698,8 @@ function createTray() {
 }
 
 function shutdown() {
+  if (shutdownStarted) return
+  shutdownStarted = true
   try {
     globalThis.__shotaiLanServer?.close()
   } catch (error) {
@@ -496,8 +716,60 @@ function shutdown() {
   }
 }
 
-app.on('second-instance', showWindow)
-app.on('before-quit', () => {
+function activeModelOperation() {
+  const state = globalThis.__shotaiModelOperationState
+  return state && Number(state.activeCount) > 0 ? state : null
+}
+
+async function confirmQuitDuringModelImport() {
+  if (quitPromptOpen) return
+  quitPromptOpen = true
+  showWindow()
+  try {
+    const operation = activeModelOperation()
+    if (!operation) return
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: '模型仍在导入',
+      message: '模型文件正在安装或转换，现在退出会导致导入失败。',
+      detail: operation.status
+        ? `当前进度：${operation.status}\n\n建议继续等待，直到界面显示模型创建成功。`
+        : '建议继续等待，直到界面显示模型创建成功。',
+      buttons: ['继续导入', '仍然退出'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+    })
+    if (result.response === 1) {
+      forceQuit = true
+      quitting = true
+      app.quit()
+    }
+  } finally {
+    quitPromptOpen = false
+  }
+}
+
+app.on('second-instance', (_event, _commandLine, _workingDirectory, additionalData) => {
+  showWindow()
+  const requestedVersion = additionalData?.version
+  if (requestedVersion && requestedVersion !== app.getVersion()) {
+    void dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: '检测到另一个 ShotAI 版本',
+      message: `当前运行的是 ${app.getVersion()}，刚刚启动的是 ${requestedVersion}。`,
+      detail: '请从系统托盘退出当前版本，再重新打开新版，避免网页和主机服务混用。',
+      buttons: ['知道了'],
+    })
+  }
+})
+app.on('before-quit', (event) => {
+  if (!forceQuit && activeModelOperation()) {
+    event.preventDefault()
+    quitting = false
+    void confirmQuitDuringModelImport()
+    return
+  }
   quitting = true
   shutdown()
 })
@@ -519,8 +791,10 @@ app.whenReady().then(async () => {
   ]) {
     ensureDirectory(join(dataRoot, directory))
   }
-  logPath = join(dataRoot, 'logs', 'desktop.log')
+  runtimeLogDirectory = prepareRuntimeLogDirectory()
+  logPath = runtimeLogFile('desktop.log')
   log(`${APP_NAME} ${app.getVersion()} 正在启动。数据目录：${dataRoot}`)
+  log(`运行日志目录：${runtimeLogDirectory}`)
   const configPath = writeRuntimeConfig()
 
   try {
