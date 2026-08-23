@@ -27,5 +27,5 @@ Windows 完整包包含图片运行组件，但不包含模型。导入 FLUX.2 K
 ## 文件校验
 
 ```text
-67c25ab4ada64b53772634c1ae3415a6db8028b5140ac56653de828042d476cf  ShotAI-1.2.0-Windows-x64-Full-CUDA12-Setup.exe
+a7339d44ed88242508fdf010ca1148893648916cb3fb30779ea07ef3f3a50759  ShotAI-1.2.0-Windows-x64-Full-CUDA12-Setup.exe
 ```
