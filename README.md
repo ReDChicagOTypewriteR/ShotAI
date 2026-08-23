@@ -10,7 +10,7 @@
 
 <p align="center">
   <img alt="Build verified" src="https://img.shields.io/badge/build-verified-2ea44f?style=flat&amp;logo=githubactions&amp;logoColor=white" />
-  <img alt="Version 1.1.9" src="https://img.shields.io/badge/version-v1.1.9-2496ed?style=flat" />
+  <img alt="Version 1.2.0" src="https://img.shields.io/badge/version-v1.2.0-2496ed?style=flat" />
   <img alt="Vue 3.5.40" src="https://img.shields.io/badge/Vue-3.5.40-42b883?style=flat&amp;logo=vuedotjs&amp;logoColor=white" />
   <img alt="Electron 43.2.0" src="https://img.shields.io/badge/Electron-43.2.0-47848f?style=flat&amp;logo=electron&amp;logoColor=white" />
   <img alt="TypeScript 5.9.3" src="https://img.shields.io/badge/TypeScript-5.9.3-3178c6?style=flat&amp;logo=typescript&amp;logoColor=white" />
@@ -39,7 +39,7 @@
 
 <p align="center">
   <a href="http://alexjoker.top/projects/ShotAI/">产品介绍</a> ·
-  <a href="https://github.com/ReDChicagOTypewriteR/ShotAI/releases/tag/v1.1.9-ubuntu">Ubuntu 版下载</a> ·
+  <a href="https://github.com/ReDChicagOTypewriteR/ShotAI/releases/tag/v1.2.0">1.2.0 下载</a> ·
   <a href="docs/USER_GUIDE.md">使用指南</a> ·
   <a href="docs/LAN_DEPLOYMENT.md">内网部署</a> ·
   <a href="docs/README.md">全部文档</a>
@@ -55,15 +55,16 @@
 
 <p><sub>01 / RELEASE HIGHLIGHTS</sub></p>
 
-## 1.1.9 · Ubuntu 22.04 完整离线版
+## 1.2.0 · 大模型导入、五人并发与对话式图片创作
 
-| 独立 Ollama 环境 | Tesla V100 / CUDA 12 | 可追踪的导入与运行日志 |
+| 一次读取大模型 | 五人容量保护 | Windows / Ubuntu 独立交付 |
 | --- | --- | --- |
-| 内置 Ollama 使用独立端口和模型目录，不再读取主机上原有 Ollama 的模型列表 | Ubuntu 上优先使用 `cuda_v12`；监控以实际显存和卸载层数区分 GPU 推理与 CPU 回退 | 安装目录、AppImage 旁和桌面均可留下启动、运行及模型导入失败记录 |
+| GGUF 先快速检查，正式导入时边写入边计算 SHA-256，避免十几 GB 文件提前完整扫描 | 默认两路推理、三路等待，第六路明确限流；主机监控显示运行数和排队数 | 公共核心保持一致，Windows EXE 与 Ubuntu DEB 分别使用自己的运行组件、路径和发布目录 |
 
-本次提供 Ubuntu 22.04 x86_64 的 DEB 与 AppImage。完整包内置 Ollama 和 CUDA
-运行库，但不包含模型权重、NVIDIA 驱动及 Ubuntu 图片生成运行器。下载、安装、
-离线模型迁移和排错见 [Ubuntu 版本说明](README_UBUNTU.md)。
+对话输入现在会自动识别“帮我生成一张图片”和“把上面的图片再优化”等请求。
+当前服务器聊天模型基线明确为 Qwen3.5。完整更新见
+[1.2.0 总说明](docs/RELEASE_1.2.0.md)、[Ubuntu 说明](docs/UBUNTU_1.2.0.md)和
+[Windows 说明](docs/WINDOWS_1.2.0.md)。
 
 <p><sub>02 / OVERVIEW</sub></p>
 
@@ -106,20 +107,17 @@ ShotAI 把本地模型、文件、资料库和图片能力放进同一个网页�
 
 | 文件 | 推荐场景 |
 | --- | --- |
-| `ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb` | 推荐安装方式，可从应用程序菜单启动 |
-| `ShotAI-1.1.9-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.AppImage` | 免安装运行、权限受限环境和故障排查 |
+| `ShotAI-1.2.0-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb` | Ubuntu 22.04 x86_64 完整离线运行环境 |
 
-安装包可从 [GitHub Release v1.1.9 Ubuntu](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/tag/v1.1.9-ubuntu)
+安装包可从 [GitHub Release v1.2.0](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/tag/v1.2.0)
 下载。完全离线安装、SHA-256 校验、V100 验证和日志位置见
 [README_UBUNTU.md](README_UBUNTU.md)。
 
 ### Windows 安装包怎么选
 
-| 版本 | 适合谁 | 内置内容 |
-| --- | --- | --- |
-| 聊天标准版 | 主要使用对话、文件、资料库和图片识别 | Electron、Ollama、CUDA 12，不含模型，约 806MB |
-| 图片组件包 | 已安装标准版，后来需要本地生成与修改图片 | stable-diffusion.cpp CUDA 12 运行组件，不含模型 |
-| 完整离线版 | 希望一次带齐聊天与图片运行环境 | 上述全部运行组件，不含模型，体积约 1.6GB |
+| 文件 | 内置内容 |
+| --- | --- |
+| `ShotAI-1.2.0-Windows-x64-Full-CUDA12-Setup.exe` | Electron、Windows Ollama、CUDA 12、图片运行组件；不含模型权重 |
 
 安装包没有放进 Git 仓库，请从项目的 [GitHub Releases](https://github.com/ReDChicagOTypewriteR/ShotAI/releases) 下载发布版本。
 
