@@ -6,7 +6,7 @@ ShotAI 使用公共核心与独立平台分支协作：`codex/windows` 负责 Wi
 ## 架构边界
 
 - 公共核心：聊天界面、会话与资料库、模型抽象接口、通用测试。
-- Ubuntu 平台层：DEB/AppImage、systemd/服务器模式、V100/CUDA/vLLM、多人并发、主机监控。
+- Ubuntu 平台层：DEB/AppImage、systemd/服务器模式、NVIDIA/CUDA 推理服务、多人并发、主机监控。
 - Windows 平台层：Windows 安装器、Windows Ollama/runtime、Windows 路径与进程管理。
 
 公共核心改动必须保持平台无关；Ubuntu 专用行为应放在 Linux/Ubuntu 配置、启动器、服务和测试中，避免在公共界面中散落平台判断。

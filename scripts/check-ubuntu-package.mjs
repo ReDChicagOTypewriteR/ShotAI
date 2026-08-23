@@ -21,7 +21,7 @@ for (const path of [
   'desktop/electron/assets/shotai.png',
   'desktop/electron/main.cjs',
   'dist/index.html',
-  'docs/UBUNTU_GUIDE.md',
+  'docs/INSTALLATION.md',
 ]) {
   await access(join(projectDirectory, path), constants.R_OK)
 }
