@@ -5,6 +5,7 @@
   "private": true,
   "version": "1.2.0",
   "description": "ShotAI 本地与内网 AI 工作台",
+  "homepage": "https://github.com/ReDChicagOTypewriteR/ShotAI",
   "author": "ShotAI",
   "main": "desktop/electron/main.cjs",
   "type": "module",
