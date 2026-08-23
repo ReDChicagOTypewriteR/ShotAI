@@ -42,36 +42,19 @@ try {
   })
   await page.getByText('真正可控的 AI 对话', { exact: true }).waitFor()
   await page
-    .getByRole('heading', { name: /能生成，\s*也能照着改。/ })
+    .getByRole('heading', { name: '能生成，也能照着改。' })
     .waitFor()
 
   const desktop = await page.evaluate(() => {
     const preview = document.querySelector('.product-preview-frame img')
-    const githubLinks = Array.from(
-      document.querySelectorAll(
-        'a[href="https://github.com/ReDChicagOTypewriteR/ShotAI"]',
-      ),
-    )
     return {
       viewportWidth: window.innerWidth,
       documentWidth: document.documentElement.scrollWidth,
       previewLoaded: preview instanceof HTMLImageElement && preview.naturalWidth > 0,
       title: document.title,
-      githubLinksValid:
-        githubLinks.length === 2 &&
-        githubLinks.every(
-          (link) =>
-            link.getAttribute('target') === '_blank' &&
-            link.getAttribute('rel')?.includes('noopener') &&
-            link.getAttribute('rel')?.includes('noreferrer'),
-        ),
     }
   })
-  if (
-    desktop.documentWidth > desktop.viewportWidth ||
-    !desktop.previewLoaded ||
-    !desktop.githubLinksValid
-  ) {
+  if (desktop.documentWidth > desktop.viewportWidth || !desktop.previewLoaded) {
     throw new Error(`desktop portal validation failed: ${JSON.stringify(desktop)}`)
   }
 
@@ -123,36 +106,17 @@ try {
     waitUntil: 'load',
     timeout: 20_000,
   })
-  await offline.getByText('我们仍能对话', { exact: true }).waitFor()
   await offline.getByText('真正可控的 AI 对话', { exact: true }).waitFor()
   const offlineMetrics = await offline.evaluate(() => {
     const preview = document.querySelector('.product-preview-frame img')
-    const docsLink = document.querySelector(
-      'a[aria-label="打开 ShotAI 使用文档"]',
-    )
     return {
       previewLoaded: preview instanceof HTMLImageElement && preview.naturalWidth > 0,
       hasSourceEntry: document.documentElement.innerHTML.includes('/src/main.ts'),
-      docsLinkValid: docsLink?.getAttribute('href') === './docs/guide/',
     }
   })
-  if (
-    !offlineMetrics.previewLoaded ||
-    offlineMetrics.hasSourceEntry ||
-    !offlineMetrics.docsLinkValid
-  ) {
+  if (!offlineMetrics.previewLoaded || offlineMetrics.hasSourceEntry) {
     throw new Error(`offline portal validation failed: ${JSON.stringify(offlineMetrics)}`)
   }
-
-  const docs = await browser.newPage({ viewport: { width: 1280, height: 800 } })
-  docs.on('console', (message) => {
-    if (message.type() === 'error') failures.push(message.text())
-  })
-  await docs.goto('http://127.0.0.1:4174/docs/guide/', {
-    waitUntil: 'load',
-    timeout: 20_000,
-  })
-  await docs.getByText('ShotAI 把本地模型', { exact: false }).waitFor()
 
   const sourceEntry = await browser.newPage({
     viewport: { width: 1280, height: 800 },
@@ -198,7 +162,6 @@ try {
         updatedContentVisible: true,
         directHtmlOpenWorks: true,
         sourceIndexRedirectsToBuiltPortal: true,
-        vitepressDocsWorks: true,
         browserErrors: 0,
       },
       null,

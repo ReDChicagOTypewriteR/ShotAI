@@ -1,20 +1,20 @@
-# ShotAI Ubuntu 工作区约束
+# ShotAI 平台工作区约束
 
-本工作区只负责 Ubuntu 22.04 x86_64 版本，工作分支固定为 `codex/ubuntu`。
+ShotAI 使用公共核心与独立平台分支协作：`codex/windows` 负责 Windows，
+`codex/ubuntu` 负责 Ubuntu 22.04 x86_64。开始工作前必须确认当前分支。
 
 ## 架构边界
 
 - 公共核心：聊天界面、会话与资料库、模型抽象接口、通用测试。
 - Ubuntu 平台层：DEB/AppImage、systemd/服务器模式、V100/CUDA/vLLM、多人并发、主机监控。
-- Windows 平台层不在本工作区实现。
+- Windows 平台层：Windows 安装器、Windows Ollama/runtime、Windows 路径与进程管理。
 
 公共核心改动必须保持平台无关；Ubuntu 专用行为应放在 Linux/Ubuntu 配置、启动器、服务和测试中，避免在公共界面中散落平台判断。
 
-## 发布边界
+## 分支与发布边界
 
-- Ubuntu 安装包只能输出到 `release/ubuntu`。
-- 不得构建、删除或修改 `release/windows`。
-- 不运行 Windows 安装器或 Windows runtime 的构建任务。
+- `codex/ubuntu` 只实现 Ubuntu 平台逻辑，安装包只能输出到 `release/ubuntu`；不得构建、删除或修改 `release/windows`。
+- `codex/windows` 只实现 Windows 平台逻辑，安装包只能输出到 `release/windows`；不得构建、删除或修改 `release/ubuntu`。
 - 未经用户明确要求，不修改应用版本号。
 
 ## 验证要求

@@ -54,7 +54,10 @@ mkdir -p "$HOME/.config/ShotAI/data/models/ollama"
 tar -xaf shotai-v100-models.tar.zst -C "$HOME/.config/ShotAI/data/models/ollama" --strip-components=1
 ```
 
-如果 `systemctl is-active ollama` 显示 `active`，ShotAI 会使用已经运行的系统 Ollama，而不会启动内置版本。此时模型目录通常是 `/usr/share/ollama/.ollama/models`，应更新系统服务或停止它后再让 ShotAI 使用内置服务，不能把两个目录混用。
+从 1.1.9 开始，即使 `systemctl is-active ollama` 显示 `active`，ShotAI 完整版也不会
+连接系统 Ollama。它会在 `11435–11454` 中选择空闲端口，并使用
+`~/.config/ShotAI/data/models/ollama/`。搬运前应退出 ShotAI，并确保同时复制
+`blobs` 与 `manifests`，不要把两个模型目录交叉写入。
 
 ## 导入失败的排查顺序
 
