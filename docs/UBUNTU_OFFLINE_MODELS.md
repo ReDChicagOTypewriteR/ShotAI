@@ -8,13 +8,9 @@
 | --- | --- | ---: | ---: |
 | 主模型、中文、图片识别 | `qwen3.5:27b-q4_K_M` | 约 17 GB | 8K–16K |
 | 快速备用、并发 | `qwen3.5:9b-q4_K_M` | 约 6.6 GB | 8K–16K |
-| 深度推理、数学、逻辑 | `deepseek-r1:32b` | 约 20 GB | 8K–16K |
-| 编程 | `deepseek-coder-v2:16b` | 约 8.9 GB | 16K–32K |
 | 本地资料检索 | `bge-m3` | 约 1.2 GB | 模型默认值 |
 
-整套文字/视觉模型约 54 GB，加上图片生成模型、缓存和运行空间，建议至少预留 100 GB。不要直接把上下文设成模型标称的 128K/256K；V100 上先使用 8K，确认稳定后再增加。
-
-这里保留 Qwen3.5 是因为它同时承担中文、多模态和图片理解；DeepSeek-R1 负责更重的推理。`deepseek-r1:32b` 本身是 DeepSeek-R1-Distill-Qwen-32B，因此它虽属于 DeepSeek 系列，底层骨架仍来自 Qwen。完整的 DeepSeek-R1 671B Q4 约 404 GB，超过这台服务器的可用磁盘，也无法放入两张 V100 的显存，不适合作为本地方案。
+这套部署以 Qwen3.5 为当前聊天模型，不再把 DeepSeek-R1 写成默认组件。五人同时使用时优先选择 `qwen3.5:9b-q4_K_M`；更重视单次回答质量时使用 27B，但仍建议只开放两路实际推理、其余请求排队。加上图片生成模型、缓存和运行空间，建议至少预留 60 GB。不要直接把上下文设成模型标称的 128K/256K；V100 上先使用 8K，确认稳定后再增加。
 
 如果确认两张 V100 都能被 `nvidia-smi` 识别，可以把主模型升级为 `qwen3.5:35b-a3b-q4_K_M`（约 24 GB）。单张 V100 也可能装得下权重，但长上下文和并发会明显增加显存压力，因此 27B 是更稳妥的默认方案。
 
@@ -40,9 +36,9 @@
 
 | 角色 | 推荐下载 |
 | --- | --- |
-| 图片主模型 | [FLUX.2 Klein 9B GGUF](https://huggingface.co/leejet/FLUX.2-klein-9B-GGUF/tree/main) 中的 `flux-2-klein-9b-Q4_0.gguf` |
-| 文字理解 | [Qwen3-8B GGUF](https://huggingface.co/unsloth/Qwen3-8B-GGUF/tree/main) 中名称包含 `8B` 的 Q4 量化文件 |
-| 图片编码/解码 | [FLUX.2 small decoder](https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/tree/main) 中的 `full_encoder_small_decoder.safetensors` |
+| 图片主模型 | [`flux-2-klein-9b-Q4_0.gguf` 直接下载](https://huggingface.co/leejet/FLUX.2-klein-9B-GGUF/resolve/main/flux-2-klein-9b-Q4_0.gguf?download=true) |
+| 文字理解 | [`Qwen3-8B-Q4_K_M.gguf` 直接下载](https://huggingface.co/unsloth/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf?download=true) |
+| 图片编码/解码 | [`full_encoder_small_decoder.safetensors` 直接下载](https://huggingface.co/black-forest-labs/FLUX.2-small-decoder/resolve/main/full_encoder_small_decoder.safetensors?download=true) |
 
 把三个文件一次性加入 ShotAI。优先从 1024×1024、4 步开始；如果单卡显存不足，
 让 Ubuntu 22.04 编译的 `sd-server` 启用 CPU offload。9B 官方权重使用 FLUX
@@ -58,8 +54,6 @@ FLUX.2 Klein 4B，或另行取得 9B 商业授权。
 ```bash
 ollama pull qwen3.5:27b-q4_K_M
 ollama pull qwen3.5:9b-q4_K_M
-ollama pull deepseek-r1:32b
-ollama pull deepseek-coder-v2:16b
 ollama pull bge-m3
 tar -C "$HOME/.ollama" -caf shotai-v100-models.tar.zst models
 ```

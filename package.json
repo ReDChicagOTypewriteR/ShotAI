@@ -40,7 +40,7 @@
     "build": "vue-tsc -b && vite build",
     "electron:start": "electron .",
     "electron:dev": "npm run build && npm run check:electron && electron .",
-    "electron:pack:win": "npm run build && npm run check:electron && electron-builder --config desktop/electron/electron-builder.windows.cjs --win nsis --x64",
+    "electron:pack:win": "npm run build && npm run check:electron && electron-builder --win nsis --x64",
     "electron:pack:win:chat": "npm run build && npm run check:electron && electron-builder --config desktop/electron/electron-builder.chat.cjs --win nsis --x64",
     "electron:pack:win:full": "npm run build && npm run check:electron && electron-builder --config desktop/electron/electron-builder.windows.cjs --win nsis --x64 && npm run check:electron-full",
     "electron:pack:ubuntu": "npm run build && npm run check:electron && npm run check:ubuntu-package && electron-builder --config desktop/electron/electron-builder.ubuntu.cjs --linux AppImage deb --x64",
