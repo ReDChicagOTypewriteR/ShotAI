@@ -145,6 +145,12 @@ function writeRuntimeConfig() {
       ...(bundled.imageRuntime || {}),
       ...(saved.imageRuntime || {}),
     },
+    concurrency: {
+      maxActiveUsers: 5,
+      maxParallelInferences: 2,
+      ...(bundled.concurrency || {}),
+      ...(saved.concurrency || {}),
+    },
   }
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) {
     config.port = DEFAULT_PORT
@@ -341,6 +347,18 @@ async function startOllama() {
           ? {
               OLLAMA_NO_CLOUD: 'true',
               OLLAMA_CONTEXT_LENGTH: process.env.OLLAMA_CONTEXT_LENGTH || '8192',
+              OLLAMA_NUM_PARALLEL: String(
+                config.concurrency?.maxParallelInferences || 2,
+              ),
+              OLLAMA_MAX_QUEUE: String(
+                Math.max(
+                  1,
+                  (config.concurrency?.maxActiveUsers || 5) -
+                    (config.concurrency?.maxParallelInferences || 2),
+                ),
+              ),
+              OLLAMA_MAX_LOADED_MODELS: '1',
+              OLLAMA_KEEP_ALIVE: '5m',
             }
           : {}),
         ...(preferredComputeLibrary
@@ -565,6 +583,10 @@ function serverEnvironment(configPath) {
       'ShotAI-model-import.log',
     ),
     SHOTAI_VERSION: app.getVersion(),
+    SHOTAI_MAX_ACTIVE_USERS: String(config.concurrency?.maxActiveUsers || 5),
+    SHOTAI_MAX_PARALLEL_INFERENCES: String(
+      config.concurrency?.maxParallelInferences || 2,
+    ),
   }
 }
 

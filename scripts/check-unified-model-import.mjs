@@ -9,11 +9,18 @@ const ollamaServiceSource = readFileSync(
   resolve(projectDirectory, 'src/services/ollama.ts'),
   'utf8',
 )
+const appSource = readFileSync(resolve(projectDirectory, 'src/App.vue'), 'utf8')
 if (/import\.meta\.resolve/.test(builtHtml) || /type=["']module["']/.test(builtHtml)) {
   throw new Error('legacy-compatible build still contains the modern browser probe')
 }
 if (!ollamaServiceSource.includes('SHOTAI_OK')) {
   throw new Error('model import is missing the instruction-following self-test')
+}
+if (
+  !ollamaServiceSource.includes('/shotai/model-import/files/') ||
+  !appSource.includes('导入时边写入边校验')
+) {
+  throw new Error('chat model import is missing the one-pass local fast path')
 }
 
 function createMetadataFreeGguf() {
@@ -94,6 +101,7 @@ try {
         duplicateFileReuseExplained: true,
         modelCacheCleanupVisible: true,
         chatInstructionSelfTest: true,
+        onePassChatModelImport: true,
       },
       null,
       2,
