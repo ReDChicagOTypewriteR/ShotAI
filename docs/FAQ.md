@@ -50,7 +50,7 @@ sudo dpkg -i ShotAI-1.2.0-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb
 
 ## Ubuntu 可以生成图片吗？
 
-可以，但除了图片模型，还需要兼容 Ubuntu 系统与显卡环境的 Linux `sd-server`。当前 Ubuntu 完整包未内置该文件；缺少时只影响图片生成，不影响对话、图片理解、文件问答和资料库。
+可以。Ubuntu 完整包已内置面向 Ubuntu 22.04 x86_64、CUDA 12 和 NVIDIA V100（sm_70）构建的 `sd-server`，仍需自行导入图片模型。若图片服务无法启动，请查看数据目录 `logs/image-runtime.log`，并确认 NVIDIA 驱动可用。
 
 ## 主机监控提示 Method Not Allowed 怎么办？
 

@@ -18,6 +18,15 @@ module.exports = {
         'SHOTAI_OLLAMA_RUNTIME_INFO.txt',
       ],
     },
+    {
+      from: 'vendor/stable-diffusion.cpp/linux',
+      to: 'runtime/image',
+      filter: [
+        'sd-server',
+        'LICENSE.stable-diffusion.cpp.txt',
+        'SHOTAI_RUNTIME_INFO.txt',
+      ],
+    },
   ],
   linux: {
     ...build.linux,

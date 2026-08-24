@@ -58,7 +58,7 @@ ShotAI 负责界面、模型管理、任务路由、文件处理和局域网共�
 | Windows 10/11 x86_64 | [`ShotAI-1.2.0-Windows-x64-Full-CUDA12-Setup.exe`](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.2.0/ShotAI-1.2.0-Windows-x64-Full-CUDA12-Setup.exe) |
 | Ubuntu 22.04 LTS x86_64 | [`ShotAI-1.2.0-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb`](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.2.0/ShotAI-1.2.0-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb) |
 
-两个完整安装包均包含 ShotAI 和对应平台的 Ollama 运行组件，不包含模型权重。Windows 完整版包含图片运行组件；Ubuntu 图片生成还需要兼容当前系统的 Linux `sd-server`。
+两个完整安装包均包含 ShotAI 和对应平台的 Ollama 运行组件，不包含模型权重。Windows 完整版包含图片运行组件；Ubuntu 完整版包含面向 Ubuntu 22.04 x86_64、CUDA 12 和 NVIDIA V100（sm_70）构建的图片运行组件。
 
 安装方法、离线部署、数据目录和日志位置见[安装与部署指南](docs/INSTALLATION.md)。
 

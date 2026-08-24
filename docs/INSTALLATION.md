@@ -30,23 +30,13 @@ shotai
 
 也可以右键 DEB 并选择系统的软件安装工具。若双击进入压缩包或没有反应，使用上面的 `dpkg` 方式。
 
-Ubuntu 完整版包含独立 Ollama 和 CUDA 运行库，不包含模型权重、NVIDIA 驱动或 Linux 图片运行器。需要 GPU 推理时，应先安装与显卡匹配的 NVIDIA 驱动，并确认：
+Ubuntu 完整版包含独立 Ollama、CUDA 运行库和面向 NVIDIA V100（sm_70）构建的 Linux 图片运行器，不包含模型权重或 NVIDIA 驱动。需要 GPU 推理时，应先安装与显卡匹配的 NVIDIA 驱动，并确认：
 
 ```bash
 nvidia-smi
 ```
 
-图片生成还需要将兼容当前 Ubuntu 环境的 `sd-server` 放入：
-
-```text
-~/.config/ShotAI/data/runtime/image/sd-server
-```
-
-然后添加执行权限：
-
-```bash
-chmod +x ~/.config/ShotAI/data/runtime/image/sd-server
-```
+图片模型导入后会直接使用安装包内的 `sd-server`。启动记录写入 `~/.config/ShotAI/data/logs/image-runtime.log`；应以日志中的 CUDA 后端初始化结果和实际显存占用判断是否使用 GPU，不能只依据系统检测到显卡。
 
 ## 第一次启动
 

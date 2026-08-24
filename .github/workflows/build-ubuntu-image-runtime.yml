@@ -1,0 +1,62 @@
+name: Build Ubuntu image runtime
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out ShotAI
+        uses: actions/checkout@v4
+
+      - name: Check out pinned stable-diffusion.cpp
+        run: |
+          git clone --branch master-827-97d2990 --depth 1 --recurse-submodules \
+            https://github.com/leejet/stable-diffusion.cpp.git /tmp/stable-diffusion.cpp
+          test "$(git -C /tmp/stable-diffusion.cpp rev-parse HEAD)" = \
+            "97d2990807fe6d558e395f8764198d7c7e7b411c"
+
+      - name: Build CUDA 12.4 sm_70 sd-server
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/ubuntu-image-runtime"
+          docker run --rm \
+            --volume /tmp/stable-diffusion.cpp:/src:ro \
+            --volume "${GITHUB_WORKSPACE}/ubuntu-image-runtime:/out" \
+            nvidia/cuda:12.4.1-devel-ubuntu22.04 bash -lc '
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends build-essential ca-certificates cmake ninja-build
+              cmake -S /src -B /tmp/sdcpp-build -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_CUDA_ARCHITECTURES=70 \
+                -DGGML_NATIVE=OFF \
+                -DSD_CUDA=ON \
+                -DSD_BUILD_EXAMPLES=ON \
+                -DSD_BUILD_SHARED_LIBS=OFF \
+                -DSD_SERVER_BUILD_FRONTEND=OFF \
+                -DSD_WEBP=OFF \
+                -DSD_WEBM=OFF
+              cmake --build /tmp/sdcpp-build --target sd-server --parallel "$(nproc)"
+              install -m 0755 /tmp/sdcpp-build/bin/sd-server /out/sd-server
+              readelf -h /out/sd-server
+              ldd /out/sd-server
+            '
+          cp /tmp/stable-diffusion.cpp/LICENSE \
+            ubuntu-image-runtime/LICENSE.stable-diffusion.cpp.txt
+          cp vendor/stable-diffusion.cpp/linux/SHOTAI_RUNTIME_INFO.txt \
+            ubuntu-image-runtime/SHOTAI_RUNTIME_INFO.txt
+          sha256sum ubuntu-image-runtime/sd-server > ubuntu-image-runtime/SHA256SUMS
+
+      - name: Upload Ubuntu image runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: shotai-ubuntu-image-runtime-cuda12-sm70
+          path: ubuntu-image-runtime/
+          if-no-files-found: error
+          retention-days: 7

@@ -38,3 +38,4 @@ vendor/**/*.so.*
 vendor/**/bin/*
 vendor/**/llama-server
 vendor/**/llama-quantize
+vendor/**/sd-server

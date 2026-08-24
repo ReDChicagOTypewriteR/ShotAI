@@ -511,10 +511,26 @@ async function startImageRuntime() {
   const output = openProcessLog('image-runtime.log')
   imageRuntimeState.state = 'starting'
   imageRuntimeState.error = ''
+  const bundledCudaDirectory = join(
+    process.resourcesPath,
+    'runtime',
+    'ollama',
+    'lib',
+    'ollama',
+    'cuda_v12',
+  )
+  const imageLibraryPath = [
+    runtimeDirectory,
+    existsSync(bundledCudaDirectory) ? bundledCudaDirectory : '',
+    process.env.LD_LIBRARY_PATH || '',
+  ].filter(Boolean).join(':')
   const child = spawn(executable, settings.args, {
     cwd: runtimeDirectory,
     windowsHide: true,
     stdio: ['ignore', output, output],
+    env: process.platform === 'linux'
+      ? { ...process.env, LD_LIBRARY_PATH: imageLibraryPath }
+      : process.env,
   })
   imageProcess = child
   child.on('error', (error) => {

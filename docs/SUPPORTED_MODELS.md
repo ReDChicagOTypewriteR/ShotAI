@@ -49,7 +49,7 @@ Embedding 模型是可选项。未配置时，资料库仍可使用关键词检�
 | Stability AI | Stable Diffusion、SDXL、SD3 兼容版本 | 能力取决于模型结构和本地运行组件 |
 | 社区模型 | Juggernaut、DreamShaper 等兼容版本 | 适用于写实、插画和风格化任务 |
 
-Windows 完整版包含图片运行组件，但不包含图片模型。Ubuntu 版需要另行准备兼容系统与显卡环境的 Linux `sd-server`，否则文字对话、图片理解和资料库仍可使用，但图片生成不可用。
+Windows 和 Ubuntu 完整版均包含对应平台的图片运行组件，但不包含图片模型。Ubuntu 运行组件面向 Ubuntu 22.04 x86_64、CUDA 12 和 NVIDIA V100（sm_70）构建；其他 NVIDIA 架构需使用匹配的运行组件。
 
 ## 导入原则
 
