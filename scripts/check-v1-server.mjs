@@ -14,6 +14,7 @@ let server
 let ollamaServer
 let activeInference = 0
 let maximumObservedInference = 0
+let cancelledInference = 0
 
 function createTestGguf() {
   const buffer = Buffer.alloc(64)
@@ -37,6 +38,25 @@ async function waitForServer() {
   throw new Error('ShotAI 测试服务没有启动')
 }
 
+async function waitForConcurrency(expected, timeout = 2_000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    const snapshot = await fetch(
+      `http://127.0.0.1:${port}/shotai/system`,
+    ).then((response) => response.json())
+    if (
+      snapshot.concurrency.running === expected.running &&
+      snapshot.concurrency.queued === expected.queued
+    ) {
+      return snapshot.concurrency
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  throw new Error(
+    `并发状态没有及时变为 running=${expected.running}, queued=${expected.queued}`,
+  )
+}
+
 try {
   const ollamaPort = port + 1
   ollamaServer = createServer((request, response) => {
@@ -54,11 +74,24 @@ try {
       activeInference += 1
       maximumObservedInference = Math.max(maximumObservedInference, activeInference)
       request.resume()
-      setTimeout(() => {
+      let settled = false
+      const finish = (cancelled = false) => {
+        if (settled) return
+        settled = true
         activeInference -= 1
+        if (cancelled) cancelledInference += 1
+      }
+      const timer = setTimeout(() => {
+        if (settled) return
+        finish()
         response.writeHead(200, { 'Content-Type': 'application/x-ndjson' })
         response.end('{"message":{"content":"ok"},"done":true}\n')
-      }, 180)
+      }, request.headers['x-shotai-test-delay'] === 'slow' ? 5_000 : 180)
+      response.once('close', () => {
+        if (response.writableEnded) return
+        clearTimeout(timer)
+        finish(true)
+      })
       return
     }
     response.writeHead(404)
@@ -147,6 +180,52 @@ try {
   assert.equal(concurrentStatuses.filter((status) => status === 429).length, 1)
   assert.equal(maximumObservedInference, 2)
 
+  const runningControllerA = new AbortController()
+  const runningControllerB = new AbortController()
+  const queuedController = new AbortController()
+  const cancellableChat = (controller) =>
+    fetch(`http://127.0.0.1:${port}/ollama/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-ShotAI-Test-Delay': 'slow',
+      },
+      body: JSON.stringify({ model: 'qwen3.5-test', prompt: 'cancel-test' }),
+      signal: controller.signal,
+    }).catch((error) => error)
+  const runningRequestA = cancellableChat(runningControllerA)
+  const runningRequestB = cancellableChat(runningControllerB)
+  await waitForConcurrency({ running: 2, queued: 0 })
+  const queuedRequest = cancellableChat(queuedController)
+  await waitForConcurrency({ running: 2, queued: 1 })
+
+  queuedController.abort()
+  await queuedRequest
+  await waitForConcurrency({ running: 2, queued: 0 })
+
+  runningControllerA.abort()
+  await runningRequestA
+  await waitForConcurrency({ running: 1, queued: 0 })
+  const replacementStartedAt = Date.now()
+  const replacementResponse = await fetch(
+    `http://127.0.0.1:${port}/ollama/api/chat`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'qwen3.5-test', prompt: 'replacement' }),
+    },
+  )
+  assert.equal(replacementResponse.status, 200)
+  assert.ok(Date.now() - replacementStartedAt < 1_500)
+
+  runningControllerB.abort()
+  await runningRequestB
+  await waitForConcurrency({ running: 0, queued: 0 })
+  for (let attempt = 0; attempt < 40 && cancelledInference < 2; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  assert.ok(cancelledInference >= 2)
+
   const modelName = 'shotai-v1-test.gguf'
   const upload = await fetch(
     `http://127.0.0.1:${port}/image-runtime/models/${modelName}`,
@@ -212,6 +291,9 @@ try {
         isolatedBlobFastPath: true,
         fiveUserAdmissionLimit: true,
         twoRequestGpuParallelism: true,
+        queuedRequestCancellation: true,
+        runningRequestCancellation: true,
+        cancelledSlotReleasedImmediately: true,
       },
       null,
       2,

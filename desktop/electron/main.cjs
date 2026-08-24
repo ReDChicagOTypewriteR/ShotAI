@@ -495,7 +495,9 @@ async function startImageRuntime() {
   if (!settings || !existsSync(executable)) {
     imageRuntimeState.state = 'unavailable'
     if (settings && !existsSync(executable)) {
-      imageRuntimeState.error = '安装包中没有找到图片运行组件，请安装完整版本。'
+      imageRuntimeState.error = process.platform === 'linux'
+        ? `图片模型文件已保存，但 Ubuntu 图片运行组件尚未安装。请将兼容当前系统的 sd-server 放入 ${executable}，添加执行权限后重启 ShotAI。`
+        : '图片模型文件已保存，但当前安装中没有图片运行组件。请重新安装 Windows 完整版。'
     }
     log('图片运行组件或图片模型未准备，跳过图片服务。')
     return

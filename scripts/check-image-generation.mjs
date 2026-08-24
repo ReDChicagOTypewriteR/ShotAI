@@ -1,5 +1,6 @@
 import { chromium } from 'playwright-core'
 
+const appUrl = process.env.SHOTAI_TEST_URL || 'http://127.0.0.1:5173'
 const browser = await chromium.launch({
   headless: true,
   executablePath:
@@ -126,7 +127,7 @@ try {
     })
   })
 
-  await page.goto('http://127.0.0.1:5173/#workbench', {
+  await page.goto(`${appUrl}/#workbench`, {
     waitUntil: 'networkidle',
     timeout: 20_000,
   })

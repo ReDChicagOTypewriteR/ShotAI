@@ -392,6 +392,7 @@ const importSha = ref('')
 const importProjectorSha = ref('')
 const importDetectedCapabilities = ref<string[]>([])
 const importFailureDetail = ref('')
+const importRuntimePending = ref(false)
 const ollamaConnected = ref(false)
 const ollamaConnectionState = ref<OllamaConnectionState>('checking')
 const ollamaVersion = ref('未检测')
@@ -1171,7 +1172,11 @@ const importDetection = computed(() => {
 })
 
 const importCapabilityLabel = computed(() => {
-  if (importMode.value === 'image') return '可以生成图片和修改图片'
+  if (importMode.value === 'image') {
+    return importRuntimePending.value
+      ? '模型文件完整，等待图片运行组件'
+      : '可以生成图片和修改图片'
+  }
   const capabilities = importDetectedCapabilities.value
   if (capabilities.includes('vision')) return '可以聊天和识别图片'
   if (capabilities.includes('embedding')) return '适合查找本地资料'
@@ -4025,6 +4030,7 @@ function openImportDialog() {
   importProjectorSha.value = ''
   importDetectedCapabilities.value = []
   importFailureDetail.value = ''
+  importRuntimePending.value = false
   importDialogOpen.value = true
 }
 
@@ -4121,6 +4127,7 @@ async function startImageModelImport() {
 
   importRunning.value = true
   imageModelImporting.value = true
+  importRuntimePending.value = false
   importProgress.value = 3
   imageModelImportProgress.value = 3
   importStatus.value = '正在准备图片模型文件'
@@ -4171,6 +4178,12 @@ async function startImageModelImport() {
       importProgress.value = progress
       imageModelImportProgress.value = progress
       if (imageRuntime.value.serviceOnline) break
+      if (
+        imageRuntime.value.modelConfigured &&
+        !imageRuntime.value.runtimeFound
+      ) {
+        break
+      }
       if (attempt > 4 && imageRuntime.value.runtimeError) {
         throw new Error(imageRuntime.value.runtimeError)
       }
@@ -4179,6 +4192,20 @@ async function startImageModelImport() {
       throw new Error(
         `图片模型文件仍不完整：${imageRuntime.value.missingFiles?.join('、') || '请重新选择同一下载页中的全部文件'}`,
       )
+    }
+    if (!imageRuntime.value.runtimeFound) {
+      imageModelId.value = AUTO_IMAGE_PROVIDER_ID
+      importName.value = imageRuntime.value.modelLabel
+      importDetectedCapabilities.value = ['image-generation', 'image-editing']
+      importRuntimePending.value = true
+      importProgress.value = 100
+      imageModelImportProgress.value = 100
+      importStatus.value =
+        imageRuntime.value.runtimeError ||
+        '图片模型文件已导入，安装图片运行组件后即可使用'
+      imageModelImportStatus.value = importStatus.value
+      importStep.value = 3
+      return
     }
     if (!imageRuntime.value.serviceOnline) {
       throw new Error(
@@ -4354,6 +4381,10 @@ async function startImport() {
 
 function finishImport() {
   importDialogOpen.value = false
+  if (importMode.value === 'image' && importRuntimePending.value) {
+    ElMessage.warning('图片模型文件已保存，安装运行组件后即可使用')
+    return
+  }
   ElMessage.success(
     importMode.value === 'image'
       ? '图片模型已经可以使用'
@@ -7387,8 +7418,9 @@ onBeforeUnmount(() => {
 
           <section v-else class="complete-step">
             <div class="complete-icon"><el-icon><CircleCheck /></el-icon></div>
-            <h3>模型导入成功</h3>
-            <p>
+            <h3>{{ importRuntimePending ? '模型文件已导入' : '模型导入成功' }}</h3>
+            <p v-if="importRuntimePending">{{ importStatus }}</p>
+            <p v-else>
               {{ importName }} 已检查完成，现在可以{{ importMetadata.isImageImport ? '生成或修改图片' : '开始对话' }}。
             </p>
             <div class="complete-model">
@@ -7399,7 +7431,12 @@ onBeforeUnmount(() => {
                   {{ importMetadata.size }} · {{ importCapabilityLabel }}
                 </small>
               </div>
-              <el-tag type="success" effect="plain">可用</el-tag>
+              <el-tag
+                :type="importRuntimePending ? 'warning' : 'success'"
+                effect="plain"
+              >
+                {{ importRuntimePending ? '待安装运行组件' : '可用' }}
+              </el-tag>
             </div>
           </section>
         </div>

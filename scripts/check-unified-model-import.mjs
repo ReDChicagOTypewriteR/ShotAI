@@ -10,6 +10,8 @@ const ollamaServiceSource = readFileSync(
   'utf8',
 )
 const appSource = readFileSync(resolve(projectDirectory, 'src/App.vue'), 'utf8')
+let imageModelConfigured = false
+let importFailureLogs = 0
 if (/import\.meta\.resolve/.test(builtHtml) || /type=["']module["']/.test(builtHtml)) {
   throw new Error('legacy-compatible build still contains the modern browser probe')
 }
@@ -51,14 +53,56 @@ try {
       body: JSON.stringify({
         available: false,
         serviceOnline: false,
-        runtimeFound: true,
-        modelConfigured: false,
+        runtimeFound: false,
+        modelConfigured: imageModelConfigured,
         modelLabel: 'FLUX.2 Klein 9B',
-        modelFiles: [],
-        missingFiles: ['图片模型文件'],
+        modelFiles: imageModelConfigured
+          ? [
+              'flux-2-klein-9b-Q4_0.gguf',
+              'Qwen3-8B-Q4_K_M.gguf',
+              'flux2-vae.safetensors',
+            ]
+          : [],
+        missingFiles: imageModelConfigured ? [] : ['图片模型文件'],
+        runtimeError: imageModelConfigured
+          ? '图片模型文件已保存，但 Ubuntu 图片运行组件尚未安装。'
+          : '',
       }),
     }),
   )
+  await page.route('**/image-runtime/models/reuse', (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ reused: false }),
+    }),
+  )
+  await page.route('**/image-runtime/models/*', (route) =>
+    route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        fileName: decodeURIComponent(new URL(route.request().url()).pathname.split('/').at(-1)),
+        size: route.request().postDataBuffer()?.length || 0,
+      }),
+    }),
+  )
+  await page.route('**/image-runtime/restart', (route) => {
+    imageModelConfigured = true
+    return route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ accepted: true, restartRequired: false }),
+    })
+  })
+  await page.route('**/shotai/model-import-log', (route) => {
+    importFailureLogs += 1
+    return route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ saved: true }),
+    })
+  })
   await page.route('**/image/v1/models', (route) => route.fulfill({ status: 503, body: '{}' }))
   await page.route('**/ollama/api/**', async (route) => {
     const pathname = new URL(route.request().url()).pathname
@@ -85,7 +129,15 @@ try {
   await dialog.getByRole('button', { name: '下一步' }).click()
   await dialog.getByText('文件正常', { exact: true }).waitFor()
   await dialog.getByText('生成与修改图片', { exact: true }).waitFor()
-  await dialog.getByRole('button', { name: '取消' }).click()
+  await dialog.getByRole('button', { name: '下一步' }).click()
+  await dialog.getByRole('button', { name: '开始导入' }).click()
+  await dialog.getByText('模型文件已导入', { exact: true }).waitFor()
+  await dialog.getByText('待安装运行组件', { exact: true }).waitFor()
+  await dialog.getByText(/Ubuntu 图片运行组件尚未安装/).waitFor()
+  if (importFailureLogs !== 0) {
+    throw new Error('missing image runtime was incorrectly recorded as a model import failure')
+  }
+  await dialog.getByRole('button', { name: '完成' }).click()
 
   await page.keyboard.press('Escape')
   await page.getByLabel('打开设置').click()
@@ -102,6 +154,8 @@ try {
         modelCacheCleanupVisible: true,
         chatInstructionSelfTest: true,
         onePassChatModelImport: true,
+        missingImageRuntimeKeepsImportedModel: true,
+        missingImageRuntimeNotLoggedAsImportFailure: true,
       },
       null,
       2,

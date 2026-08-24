@@ -13,6 +13,7 @@ let receivedHeaders = null
 let receivedImageHeaders = null
 let receivedVisionImage = null
 let receivedReferenceImage = null
+let cancelledImageRequests = 0
 
 const mockOllama = createServer(async (request, response) => {
   if (request.method === 'POST' && request.url === '/api/show') {
@@ -79,6 +80,18 @@ const mockImageRuntime = createServer(async (request, response) => {
     receivedImageHeaders = request.headers
     for await (const _chunk of request) {
       // Drain the body so the proxy can finish cleanly.
+    }
+    if (request.headers['x-shotai-test-delay'] === 'slow') {
+      const timer = setTimeout(() => {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ data: [{ b64_json: 'too-late' }] }))
+      }, 5_000)
+      response.once('close', () => {
+        if (response.writableEnded) return
+        clearTimeout(timer)
+        cancelledImageRequests += 1
+      })
+      return
     }
     response.writeHead(200, { 'Content-Type': 'application/json' })
     response.end(JSON.stringify({ data: [{ b64_json: 'test-image' }] }))
@@ -212,6 +225,27 @@ try {
   )
   assert.equal(receivedImageHeaders?.['x-shotai-proxy'], 'shotai-image')
 
+  const imageAbortController = new AbortController()
+  const cancelledImageRequest = fetch(
+    `http://127.0.0.1:${lanPort}/image/v1/images/generations`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-ShotAI-Test-Delay': 'slow',
+      },
+      body: JSON.stringify({ prompt: 'cancel image proxy test' }),
+      signal: imageAbortController.signal,
+    },
+  ).catch((error) => error)
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  imageAbortController.abort()
+  await cancelledImageRequest
+  for (let attempt = 0; attempt < 40 && !cancelledImageRequests; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  assert.equal(cancelledImageRequests, 1)
+
   const referenceImage = `data:image/jpeg;base64,${largeVisionImage}`
   const imageEditResponse = await fetch(
     `http://127.0.0.1:${lanPort}/image/sdapi/v1/img2img`,
@@ -241,7 +275,7 @@ try {
   assert.equal(imageStatus.serviceOnline, true)
 
   console.log(
-    'LAN proxy check passed: browser Origin/Referer are removed for Ollama, image generation, and image editing.',
+    'LAN proxy check passed: browser headers are sanitized and cancelled image requests close the upstream runtime.',
   )
 } finally {
   lanServer.kill('SIGTERM')

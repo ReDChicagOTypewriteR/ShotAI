@@ -59,6 +59,9 @@ for (const expected of [
 
 assert.ok(serverSource.includes('platform: process.platform'))
 assert.ok(!mainSource.includes('logs\\\\image-runtime.log'))
+assert.ok(mainSource.includes('Ubuntu 图片运行组件尚未安装'))
+assert.ok(mainSource.includes('添加执行权限后重启 ShotAI'))
+assert.ok(!mainSource.includes('安装包中没有找到图片运行组件，请安装完整版本'))
 
 console.log(
   JSON.stringify(

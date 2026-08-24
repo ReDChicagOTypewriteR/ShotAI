@@ -1054,11 +1054,21 @@ function proxyLocalService(
   )
   const proxyHeaders = { ...request.headers }
   const operation = options.operation || null
+  let upstreamResponse = null
   let completed = false
   const complete = () => {
     if (completed) return
     completed = true
     options.onComplete?.()
+  }
+  const cancelUpstream = () => {
+    if (completed) return
+    finishModelOperation(operation, false, '模型导入连接已中断')
+    complete()
+    if (upstreamResponse && !upstreamResponse.destroyed) {
+      upstreamResponse.destroy()
+    }
+    if (!proxyRequest.destroyed) proxyRequest.destroy()
   }
 
   // The browser sends the public ShotAI address as Origin on POST requests.
@@ -1086,6 +1096,7 @@ function proxyLocalService(
       headers: proxyHeaders,
     },
     (proxyResponse) => {
+      upstreamResponse = proxyResponse
       response.writeHead(proxyResponse.statusCode || 502, proxyResponse.headers)
       if (operation) {
         proxyResponse.on('data', (chunk) => {
@@ -1112,6 +1123,7 @@ function proxyLocalService(
   proxyRequest.on('error', (error) => {
     finishModelOperation(operation, false, `AI 服务连接中断：${error.message}`)
     complete()
+    if (response.destroyed) return
     if (response.headersSent) {
       response.destroy(error)
       return
@@ -1122,9 +1134,14 @@ function proxyLocalService(
   })
 
   request.on('aborted', () => {
-    finishModelOperation(operation, false, '模型导入连接已中断')
-    complete()
-    proxyRequest.destroy()
+    cancelUpstream()
+  })
+  response.on('close', () => {
+    // Once a POST body has arrived, aborting fetch() normally closes the
+    // downstream response rather than emitting `aborted` on IncomingMessage.
+    // Propagate that disconnect to Ollama/sd-server so the GPU task and its
+    // concurrency slot do not survive a stopped or closed conversation.
+    if (!response.writableEnded) cancelUpstream()
   })
   request.pipe(proxyRequest)
 }
@@ -1212,11 +1229,15 @@ function proxyOllama(request, response, requestUrl) {
     cancelled: false,
     finished: false,
   }
-  request.once('aborted', () => {
+  const cancelQueuedInference = () => {
     if (item.startedAt) return
     item.cancelled = true
     const index = inferenceQueue.indexOf(item)
     if (index >= 0) inferenceQueue.splice(index, 1)
+  }
+  request.once('aborted', cancelQueuedInference)
+  response.once('close', () => {
+    if (!response.writableEnded) cancelQueuedInference()
   })
 
   if (inferenceLoadState.running < maximumParallelInferences) {
