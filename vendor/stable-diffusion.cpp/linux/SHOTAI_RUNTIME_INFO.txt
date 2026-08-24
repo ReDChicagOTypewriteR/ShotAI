@@ -6,6 +6,7 @@ Upstream commit: 97d2990807fe6d558e395f8764198d7c7e7b411c
 Target: Ubuntu 22.04 x86_64
 CUDA toolkit: CUDA 12.4
 CUDA architecture: NVIDIA sm_70 (Tesla V100)
+NCCL: bundled from the CUDA 12.4.1 Ubuntu 22.04 image
 CPU portability: GGML_NATIVE=OFF
 Frontend: disabled (ShotAI supplies the user interface)
 Models: not included

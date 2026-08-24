@@ -16,6 +16,7 @@ const imageRuntimeDirectory = join(
   'linux',
 )
 const imageExecutablePath = join(imageRuntimeDirectory, 'sd-server')
+const ncclLibraryPath = join(imageRuntimeDirectory, 'libnccl.so.2')
 const packageJson = JSON.parse(
   await readFile(join(projectDirectory, 'package.json'), 'utf8'),
 )
@@ -34,6 +35,7 @@ for (const path of [
   join(runtimeDirectory, 'LICENSE.ollama.txt'),
   join(runtimeDirectory, 'SHOTAI_OLLAMA_RUNTIME_INFO.txt'),
   imageExecutablePath,
+  ncclLibraryPath,
   join(imageRuntimeDirectory, 'LICENSE.stable-diffusion.cpp.txt'),
   join(imageRuntimeDirectory, 'SHOTAI_RUNTIME_INFO.txt'),
   join(projectDirectory, 'desktop', 'electron', 'after-install-linux.sh'),
@@ -59,6 +61,13 @@ assert.ok(
   (await stat(imageExecutablePath)).mode & 0o111,
   '图片运行组件缺少执行权限',
 )
+const ncclLibrary = await open(ncclLibraryPath, 'r')
+const ncclElfHeader = Buffer.alloc(20)
+await ncclLibrary.read(ncclElfHeader, 0, ncclElfHeader.length, 0)
+await ncclLibrary.close()
+assert.deepEqual([...ncclElfHeader.subarray(0, 4)], [0x7f, 0x45, 0x4c, 0x46])
+assert.equal(ncclElfHeader[4], 2, 'NCCL 运行库不是 64 位 ELF')
+assert.equal(ncclElfHeader.readUInt16LE(18), 62, 'NCCL 运行库不是 x86_64 ELF')
 const imageRuntimeInfo = await readFile(
   join(imageRuntimeDirectory, 'SHOTAI_RUNTIME_INFO.txt'),
   'utf8',
@@ -92,7 +101,8 @@ assert.ok(
     (resource) =>
       resource.from === 'vendor/stable-diffusion.cpp/linux' &&
       resource.to === 'runtime/image' &&
-      resource.filter.includes('sd-server'),
+      resource.filter.includes('sd-server') &&
+      resource.filter.includes('libnccl.so.2'),
   ),
 )
 assert.ok(mainSource.includes("[name, join('bin', name)]"))

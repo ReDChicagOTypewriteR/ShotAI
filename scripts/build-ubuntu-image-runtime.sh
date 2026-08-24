@@ -52,9 +52,12 @@ docker cp "${source_directory}/." "${container_name}:/src"
 docker start --attach "${container_name}"
 docker cp "${container_name}:/tmp/sdcpp-build/bin/sd-server" \
   "${output_directory}/sd-server"
+docker cp --follow-link "${container_name}:/lib/x86_64-linux-gnu/libnccl.so.2" \
+  "${output_directory}/libnccl.so.2"
 
 cp "${source_directory}/LICENSE" \
   "${output_directory}/LICENSE.stable-diffusion.cpp.txt"
 chmod 0755 "${output_directory}/sd-server"
+chmod 0644 "${output_directory}/libnccl.so.2"
 
 echo "Ubuntu image runtime built at ${output_directory}/sd-server"

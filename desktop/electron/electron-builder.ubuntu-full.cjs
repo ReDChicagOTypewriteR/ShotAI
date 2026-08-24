@@ -23,6 +23,7 @@ module.exports = {
       to: 'runtime/image',
       filter: [
         'sd-server',
+        'libnccl.so.2',
         'LICENSE.stable-diffusion.cpp.txt',
         'SHOTAI_RUNTIME_INFO.txt',
       ],

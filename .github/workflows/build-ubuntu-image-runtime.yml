@@ -50,6 +50,7 @@ jobs:
                 -DSD_WEBM=OFF
               cmake --build /tmp/sdcpp-build --target sd-server --parallel "$(nproc)"
               install -m 0755 /tmp/sdcpp-build/bin/sd-server /out/sd-server
+              install -m 0644 /lib/x86_64-linux-gnu/libnccl.so.2 /out/libnccl.so.2
               readelf -h /out/sd-server
               ldd /out/sd-server
             '
@@ -57,7 +58,8 @@ jobs:
             ubuntu-image-runtime/LICENSE.stable-diffusion.cpp.txt
           cp vendor/stable-diffusion.cpp/linux/SHOTAI_RUNTIME_INFO.txt \
             ubuntu-image-runtime/SHOTAI_RUNTIME_INFO.txt
-          sha256sum ubuntu-image-runtime/sd-server > ubuntu-image-runtime/SHA256SUMS
+          sha256sum ubuntu-image-runtime/sd-server ubuntu-image-runtime/libnccl.so.2 \
+            > ubuntu-image-runtime/SHA256SUMS
 
       - name: Upload Ubuntu image runtime
         uses: actions/upload-artifact@v4
