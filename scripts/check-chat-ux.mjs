@@ -348,7 +348,11 @@ try {
     fullPage: false,
   })
   await page.getByRole('button', { name: '打开设置' }).click()
-  await page.locator('.theme-setting-row .el-switch').click()
+  await page
+    .locator('.theme-setting-row')
+    .filter({ hasText: '深色主题' })
+    .locator('.el-switch')
+    .click()
   const lightThemeMetrics = await page.evaluate(() => {
     const drawer = document.querySelector('.el-drawer')
     const settingsText = document.querySelector('.capability-overview strong')

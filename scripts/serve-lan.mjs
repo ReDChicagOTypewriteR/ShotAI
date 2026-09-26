@@ -280,11 +280,7 @@ function monitorSession(request) {
   return token
 }
 
-function requireHostMonitorAccess(request, response) {
-  if (!isHostRequest(request)) {
-    respondJson(response, 403, { error: '监控平台只能在运行 ShotAI 的主机上访问' })
-    return false
-  }
+function requireMonitorAccess(request, response) {
   if (!monitorSession(request)) {
     respondJson(response, 401, { error: '请先登录监控平台' })
     return false
@@ -1492,10 +1488,6 @@ const server = createServer(async (request, response) => {
   markClientOnline(request, requestUrl)
 
   if (requestUrl.pathname === '/shotai/monitor/session') {
-    if (!isHostRequest(request)) {
-      respondJson(response, 403, { error: '监控平台只能在运行 ShotAI 的主机上访问' })
-      return
-    }
     if (request.method !== 'GET') {
       respondMethodNotAllowed(response, 'GET')
       return
@@ -1508,10 +1500,6 @@ const server = createServer(async (request, response) => {
   }
 
   if (requestUrl.pathname === '/shotai/monitor/login') {
-    if (!isHostRequest(request)) {
-      respondJson(response, 403, { error: '监控平台只能在运行 ShotAI 的主机上访问' })
-      return
-    }
     if (request.method !== 'POST') {
       respondMethodNotAllowed(response, 'POST')
       return
@@ -1561,10 +1549,6 @@ const server = createServer(async (request, response) => {
   }
 
   if (requestUrl.pathname === '/shotai/monitor/logout') {
-    if (!isHostRequest(request)) {
-      respondJson(response, 403, { error: '监控平台只能在运行 ShotAI 的主机上访问' })
-      return
-    }
     if (request.method !== 'POST') {
       respondMethodNotAllowed(response, 'POST')
       return
@@ -1584,7 +1568,7 @@ const server = createServer(async (request, response) => {
   }
 
   if (requestUrl.pathname === '/shotai/monitor/snapshot') {
-    if (!requireHostMonitorAccess(request, response)) return
+    if (!requireMonitorAccess(request, response)) return
     if (request.method !== 'GET') {
       respondMethodNotAllowed(response, 'GET')
       return

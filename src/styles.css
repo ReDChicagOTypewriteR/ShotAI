@@ -970,6 +970,28 @@ button {
   letter-spacing: 0.08em;
 }
 
+.message-artifact-list {
+  margin-top: 10px;
+}
+
+.message-file-card.is-output {
+  background: color-mix(in srgb, var(--success) 8%, var(--surface-soft));
+  border-color: color-mix(in srgb, var(--success) 38%, var(--border));
+}
+
+.message-file-card.is-output .message-file-icon {
+  color: var(--bg);
+  background: var(--success);
+  border-color: var(--success);
+}
+
+.message-file-card.is-output .message-file-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+}
+
 .attachment-preview > strong,
 .attachment-preview > span {
   display: block;
@@ -3678,7 +3700,11 @@ button {
 }
 
 .message-footer > span:first-child {
-  display: none;
+  display: inline-flex;
+  margin-right: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .message-footer .el-button {
@@ -4769,6 +4795,262 @@ button {
   background: var(--composer);
   border: 1px solid var(--border-strong);
   border-radius: 14px;
+}
+
+.composer-skill-strip .composer-reference-add {
+  width: auto;
+  min-height: 38px;
+  grid-column: auto;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.desktop-pet {
+  position: fixed;
+  z-index: 1200;
+  right: 24px;
+  bottom: 22px;
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.desktop-pet-panel,
+.desktop-pet-character {
+  pointer-events: auto;
+}
+
+.desktop-pet-panel {
+  position: relative;
+  width: min(260px, calc(100vw - 32px));
+  padding: 16px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  box-shadow: var(--shadow-elevated);
+  backdrop-filter: blur(20px);
+  animation: pet-panel-in 220ms ease-out both;
+}
+
+.desktop-pet-panel > strong {
+  display: block;
+  max-width: calc(100% - 28px);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.desktop-pet-panel-close {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.desktop-pet-panel-close:hover,
+.desktop-pet-panel-close:focus-visible {
+  color: var(--text);
+  background: var(--surface-hover);
+  outline: 2px solid var(--focus-ring);
+}
+
+.desktop-pet-focus-time {
+  margin-top: 12px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.desktop-pet-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.desktop-pet-actions button {
+  min-height: 44px;
+  padding: 0 14px;
+  color: var(--text);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: background-color 180ms ease, border-color 180ms ease;
+}
+
+.desktop-pet-actions button:first-child {
+  color: var(--bg);
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+.desktop-pet-actions button:hover,
+.desktop-pet-actions button:focus-visible {
+  border-color: var(--border-strong);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.desktop-pet-character {
+  position: relative;
+  width: 92px;
+  height: 98px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.28));
+  transform-origin: 50% 100%;
+  transition: transform 180ms ease, filter 180ms ease;
+}
+
+.desktop-pet-character:hover,
+.desktop-pet-character:focus-visible {
+  filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.34));
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 5px;
+  border-radius: 32px;
+  transform: translateY(-3px);
+}
+
+.desktop-pet-character.is-reacting {
+  animation: pet-bounce 360ms ease-out;
+}
+
+.cat-body {
+  position: absolute;
+  right: 14px;
+  bottom: 2px;
+  width: 58px;
+  height: 58px;
+  background: #f4a261;
+  border: 3px solid #3a2a25;
+  border-radius: 48% 48% 38% 38%;
+}
+
+.cat-head {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 9px;
+  width: 68px;
+  height: 60px;
+  background: #f6ad67;
+  border: 3px solid #3a2a25;
+  border-radius: 45% 45% 48% 48%;
+}
+
+.cat-ear {
+  position: absolute;
+  z-index: -1;
+  top: -14px;
+  width: 24px;
+  height: 28px;
+  background: #f6ad67;
+  border: 3px solid #3a2a25;
+  transform: rotate(45deg);
+}
+
+.cat-ear.is-left { left: 4px; border-radius: 5px 2px 7px 2px; }
+.cat-ear.is-right { right: 4px; border-radius: 2px 5px 2px 7px; }
+
+.cat-eye {
+  position: absolute;
+  top: 25px;
+  width: 8px;
+  height: 10px;
+  background: #25201f;
+  border-radius: 50%;
+  animation: pet-blink 5s infinite;
+}
+
+.cat-eye.is-left { left: 17px; }
+.cat-eye.is-right { right: 17px; }
+
+.cat-nose {
+  position: absolute;
+  top: 38px;
+  left: 50%;
+  width: 7px;
+  height: 5px;
+  background: #7a3f45;
+  border-radius: 50% 50% 60% 60%;
+  transform: translateX(-50%);
+}
+
+.cat-tail {
+  position: absolute;
+  right: 0;
+  bottom: 11px;
+  width: 42px;
+  height: 18px;
+  border: 7px solid #3a2a25;
+  border-left-color: transparent;
+  border-radius: 50%;
+  transform: rotate(-28deg);
+  transform-origin: left center;
+}
+
+.desktop-pet-character.is-focusing .cat-tail {
+  animation: pet-tail 2.2s ease-in-out infinite;
+}
+
+@keyframes pet-bounce {
+  0%, 100% { transform: translateY(0) scale(1); }
+  45% { transform: translateY(-10px) scale(1.04, 0.96); }
+}
+
+@keyframes pet-tail {
+  0%, 100% { transform: rotate(-28deg); }
+  50% { transform: rotate(-8deg); }
+}
+
+@keyframes pet-blink {
+  0%, 46%, 50%, 100% { transform: scaleY(1); }
+  48% { transform: scaleY(0.12); }
+}
+
+@keyframes pet-panel-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 720px) {
+  .desktop-pet {
+    right: 12px;
+    bottom: 86px;
+  }
+
+  .desktop-pet-character {
+    width: 78px;
+    height: 84px;
+    transform: scale(0.88);
+    transform-origin: right bottom;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-pet-panel,
+  .desktop-pet-character,
+  .desktop-pet-character.is-reacting,
+  .desktop-pet-character.is-focusing .cat-tail,
+  .cat-eye {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 .composer-auto-route {

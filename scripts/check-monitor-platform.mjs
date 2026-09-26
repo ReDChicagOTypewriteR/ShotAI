@@ -79,13 +79,21 @@ try {
   assert.match(source, /AI 运行方式/)
   assert.match(source, /GPU 卸载层/)
 
+  const serverSource = await readFile(join(projectDirectory, 'scripts', 'serve-lan.mjs'), 'utf8')
+  assert.doesNotMatch(
+    serverSource,
+    /监控平台只能在运行 ShotAI 的主机上访问/,
+  )
+  assert.match(serverSource, /if \(!monitorSession\(request\)\)/)
+
   console.log(JSON.stringify({
     monitorPlatform: true,
-    hostOnly: true,
+    lanAccessible: true,
     authenticated: true,
     methodMismatchExplained: true,
     inferenceBackendReported: true,
     modelImportProtectionReported: true,
+    lanMonitorLoginRequired: true,
   }))
 } finally {
   child.kill('SIGTERM')

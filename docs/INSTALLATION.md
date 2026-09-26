@@ -81,3 +81,15 @@ nvidia-smi
 - 修改端口、并发或监控配置后，需要完全重启 ShotAI。
 
 安装或运行异常见[常见问题](FAQ.md)，模型兼容范围见[支持的模型与厂商](SUPPORTED_MODELS.md)。
+
+## 双平台构建
+
+源码统一维护，平台运行组件与安装器分别打包：
+
+```bash
+npm run release:windows
+npm run release:ubuntu
+```
+
+需要顺序生成两套安装包时使用 `npm run release:all`。Windows 产物只写入
+`release/windows`，Ubuntu 产物只写入 `release/ubuntu`。

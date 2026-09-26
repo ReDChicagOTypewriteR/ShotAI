@@ -1,8 +1,9 @@
 const DATABASE_NAME = 'shotai-local'
-const DATABASE_VERSION = 3
+const DATABASE_VERSION = 4
 const WORKSPACE_STORE_NAME = 'workspace'
 const KNOWLEDGE_STORE_NAME = 'knowledge'
 const IMAGE_HISTORY_STORE_NAME = 'image-history'
+const ARTIFACT_STORE_NAME = 'artifacts'
 const WORKSPACE_KEY = 'primary'
 const KNOWLEDGE_KEY = 'primary'
 const IMAGE_HISTORY_KEY = 'primary'
@@ -21,6 +22,9 @@ function openDatabase() {
       }
       if (!database.objectStoreNames.contains(IMAGE_HISTORY_STORE_NAME)) {
         database.createObjectStore(IMAGE_HISTORY_STORE_NAME)
+      }
+      if (!database.objectStoreNames.contains(ARTIFACT_STORE_NAME)) {
+        database.createObjectStore(ARTIFACT_STORE_NAME)
       }
     })
     request.addEventListener('success', () => resolve(request.result))
@@ -111,5 +115,46 @@ export function clearImageHistory() {
     IMAGE_HISTORY_STORE_NAME,
     'readwrite',
     (store) => store.delete(IMAGE_HISTORY_KEY),
+  ).then(() => undefined)
+}
+
+export interface LocalArtifactRecord {
+  id: string
+  name: string
+  mimeType: string
+  size: number
+  createdAt: number
+  blob: Blob
+}
+
+export function saveLocalArtifact(artifact: LocalArtifactRecord) {
+  return runTransaction<IDBValidKey>(
+    ARTIFACT_STORE_NAME,
+    'readwrite',
+    (store) => store.put(artifact, artifact.id),
+  ).then(() => undefined)
+}
+
+export function loadLocalArtifact(artifactId: string) {
+  return runTransaction<LocalArtifactRecord | undefined>(
+    ARTIFACT_STORE_NAME,
+    'readonly',
+    (store) => store.get(artifactId),
+  )
+}
+
+export function deleteLocalArtifact(artifactId: string) {
+  return runTransaction<undefined>(
+    ARTIFACT_STORE_NAME,
+    'readwrite',
+    (store) => store.delete(artifactId),
+  ).then(() => undefined)
+}
+
+export function clearLocalArtifacts() {
+  return runTransaction<undefined>(
+    ARTIFACT_STORE_NAME,
+    'readwrite',
+    (store) => store.clear(),
   ).then(() => undefined)
 }
