@@ -70,41 +70,27 @@ function ensureDirectory(path) {
 }
 
 function runtimeLogFile(name) {
-  if (!runtimeLogDirectory) return join(dataRoot, 'logs', name)
-  if (process.platform !== 'linux' || !app.isPackaged) {
-    return join(runtimeLogDirectory, name)
-  }
-  const userId = typeof process.getuid === 'function' ? process.getuid() : 'user'
-  const extension = extname(name)
-  const stem = extension ? name.slice(0, -extension.length) : name
-  return join(runtimeLogDirectory, `${stem}-${userId}${extension}`)
+  return join(runtimeLogDirectory || join(dataRoot, 'logs'), name)
 }
 
 function prepareRuntimeLogDirectory() {
-  const candidates = []
-  if (process.platform === 'linux' && app.isPackaged) {
-    if (process.env.APPIMAGE) {
-      candidates.push(join(dirname(resolve(process.env.APPIMAGE)), 'ShotAI-logs'))
-    } else {
-      candidates.push(join(dirname(process.execPath), 'logs'))
-    }
-    candidates.push(join(app.getPath('desktop'), 'ShotAI-logs'))
-  }
-  candidates.push(join(dataRoot, 'logs'))
-
-  for (const directory of [...new Set(candidates)]) {
-    const probePath = join(directory, `.shotai-write-test-${process.pid}`)
+  const desktopDirectory = join(app.getPath('desktop'), 'ShotAI-logs')
+  for (const directory of [desktopDirectory, join(dataRoot, 'logs')]) {
     try {
       ensureDirectory(directory)
+      const probePath = join(directory, `.shotai-write-test-${process.pid}`)
       const descriptor = openSync(probePath, 'a')
       closeSync(descriptor)
       unlinkSync(probePath)
+      if (directory !== desktopDirectory) {
+        appendFileSync(join(directory, 'desktop.log'), `${new Date().toISOString()} 桌面日志目录不可写，日志备用位置：${directory}\n`)
+      }
       return directory
-    } catch {
-      // Try the next writable location.
+    } catch (error) {
+      console.error(`日志目录不可写 ${directory}：${error.message}`)
     }
   }
-  return join(dataRoot, 'logs')
+  throw new Error('桌面和数据目录均无法保存日志，请检查目录权限和磁盘空间')
 }
 
 function log(message) {
@@ -147,7 +133,7 @@ function writeRuntimeConfig() {
     },
     concurrency: {
       maxActiveUsers: 5,
-      maxParallelInferences: 2,
+      maxParallelInferences: 5,
       ...(bundled.concurrency || {}),
       ...(saved.concurrency || {}),
     },
@@ -322,6 +308,11 @@ async function startOllama() {
   }
   const output = openProcessLog('ollama.log')
   try {
+    // AppImage mounts and installer directories can disappear during upgrades.
+    // Helpers inherit this directory, including GGUF validation and runners.
+    const workingDirectory = ensureDirectory(join(dataRoot, 'runtime-work', 'ollama'))
+    globalThis.__shotaiOllamaDiagnostic = { executable, workingDirectory, pid: 0, exitCode: null, signal: null }
+    log(`Ollama 工作目录：${workingDirectory}；运行文件：${executable}`)
     cleanupInterruptedOllamaCopies(shotAIModelDirectory)
     const preferredComputeLibrary = isBundledOllama
       ? bundledCudaLibrary(executable, 'cuda_v12')
@@ -338,7 +329,7 @@ async function startOllama() {
       )
     }
     const child = spawn(executable, ['serve'], {
-      cwd: existsSync(executable) ? dirname(executable) : undefined,
+      cwd: workingDirectory,
       windowsHide: true,
       detached: process.platform !== 'win32',
       stdio: ['ignore', output, output],
@@ -349,16 +340,12 @@ async function startOllama() {
         ...(isBundledOllama
           ? {
               OLLAMA_NO_CLOUD: 'true',
-              OLLAMA_CONTEXT_LENGTH: process.env.OLLAMA_CONTEXT_LENGTH || '8192',
+              OLLAMA_CONTEXT_LENGTH: process.env.OLLAMA_CONTEXT_LENGTH || '4096',
               OLLAMA_NUM_PARALLEL: String(
-                config.concurrency?.maxParallelInferences || 2,
+                config.concurrency?.maxParallelInferences || 5,
               ),
               OLLAMA_MAX_QUEUE: String(
-                Math.max(
-                  1,
-                  (config.concurrency?.maxActiveUsers || 5) -
-                    (config.concurrency?.maxParallelInferences || 2),
-                ),
+                Math.max(1, Math.min(5, config.concurrency?.maxActiveUsers || 5)),
               ),
               OLLAMA_MAX_LOADED_MODELS: '1',
               OLLAMA_KEEP_ALIVE: '5m',
@@ -370,6 +357,7 @@ async function startOllama() {
       },
     })
     ollamaProcess = child
+    globalThis.__shotaiOllamaDiagnostic.pid = child.pid || 0
     Object.assign(ollamaRuntimeState, {
       source: isBundledOllama ? 'embedded' : 'managed',
       endpoint: config.ollamaUrl,
@@ -378,7 +366,10 @@ async function startOllama() {
       isolated: isBundledOllama,
     })
     child.on('error', (error) => log(`Ollama 启动失败：${error.message}`))
-    child.on('exit', (code) => log(`Ollama 已停止，代码：${code}`))
+    child.on('exit', (code, signal) => {
+      Object.assign(globalThis.__shotaiOllamaDiagnostic, { exitCode: code, signal })
+      log(`Ollama 已停止，代码：${code}，信号：${signal || 'none'}`)
+    })
     await waitForEndpoint(versionUrl, child)
     log(`Ollama 已启动：${executable}（PID ${child.pid || '未知'}）`)
   } catch (error) {
@@ -497,7 +488,7 @@ async function startImageRuntime() {
     if (settings && !existsSync(executable)) {
       imageRuntimeState.error = process.platform === 'linux'
         ? `图片模型文件已保存，但 Ubuntu 图片运行组件尚未安装。请将兼容当前系统的 sd-server 放入 ${executable}，添加执行权限后重启 ShotAI。`
-        : '图片模型文件已保存，但当前安装中没有图片运行组件。请重新安装 Windows 完整版。'
+        : `图片模型文件已保存，但 Windows 图片运行扩展尚未安装。请将对应系统的图片运行文件放入 ${runtimeDirectory}，重启 ShotAI。`
     }
     log('图片运行组件或图片模型未准备，跳过图片服务。')
     return
@@ -552,6 +543,7 @@ async function startImageRuntime() {
 
 function stopProcess(child) {
   if (!child?.pid) return
+  if (child.exitCode !== null || child.signalCode !== null) return
   if (process.platform === 'win32') {
     spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
       windowsHide: true,
@@ -598,15 +590,11 @@ function serverEnvironment(configPath) {
     SHOTAI_IMAGE_MODEL_DIRECTORY: join(dataRoot, 'models', 'image'),
     SHOTAI_IMAGE_RUNTIME_DIRECTORY: runtimeDirectory,
     SHOTAI_LOG_DIRECTORY: runtimeLogDirectory,
-    SHOTAI_INSTALL_MODEL_IMPORT_LOG_PATH: runtimeLogFile('model-import.log'),
-    SHOTAI_MODEL_IMPORT_LOG_PATH: join(
-      app.getPath('desktop'),
-      'ShotAI-model-import.log',
-    ),
+    SHOTAI_MODEL_IMPORT_LOG_PATH: runtimeLogFile('ShotAI-model-import.log'),
     SHOTAI_VERSION: app.getVersion(),
     SHOTAI_MAX_ACTIVE_USERS: String(config.concurrency?.maxActiveUsers || 5),
     SHOTAI_MAX_PARALLEL_INFERENCES: String(
-      config.concurrency?.maxParallelInferences || 2,
+      config.concurrency?.maxParallelInferences || 5,
     ),
   }
 }
@@ -634,6 +622,7 @@ async function startLanServer(configPath) {
   globalThis.__shotaiLanServerError = null
   globalThis.__shotaiLanServerReady = false
   globalThis.__shotaiRestartImageRuntime = restartImageRuntime
+  globalThis.__shotaiOpenLogDirectory = () => shell.openPath(runtimeLogDirectory)
 
   await import(pathToFileURL(script).href)
   const deadline = Date.now() + CONTROL_TIMEOUT_MS

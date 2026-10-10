@@ -22,6 +22,7 @@ export interface ShotAISystemInfo {
 }
 
 export interface InferenceConcurrency {
+  activeClients?: number
   maxActiveUsers: number
   maxParallelInferences: number
   running: number
@@ -85,7 +86,7 @@ export interface MonitorSnapshot {
     }
     inference: {
       state: 'idle' | 'importing' | 'running' | 'unavailable'
-      backend: 'idle' | 'gpu' | 'cpu' | 'unknown'
+      backend: 'idle' | 'gpu' | 'mixed' | 'cpu' | 'unknown'
       model: string
       modelBytes: number
       vramBytes: number
@@ -233,9 +234,25 @@ export async function cleanupModelCache(): Promise<ModelCacheCleanupResult> {
   return JSON.parse(body) as ModelCacheCleanupResult
 }
 
+export interface ModelMaintenanceJob {
+  id: string; state: 'running' | 'completed' | 'partial' | 'failed' | 'interrupted'
+  stage: string; total: number; deleted: string[]; failures: { model: string; error: string }[]
+  error?: string; currentModel?: string; cleanup?: ModelCacheCleanupResult
+}
+export async function modelMaintenance(start = false): Promise<ModelMaintenanceJob | null> {
+  const response = await fetch('/shotai/model-maintenance', {
+    method: start ? 'POST' : 'GET', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    ...(start ? { body: JSON.stringify({ confirm: '清理模型' }) } : {}),
+  })
+  const body = await response.json()
+  if (!response.ok) throw new Error(body.error || '无法访问清理任务')
+  return body.job
+}
+
 export async function writeModelImportFailureLog(
   report: ModelImportFailureReport,
-): Promise<{ saved: boolean; path: string }> {
+): Promise<{ saved: boolean; path: string; downloadUrl?: string }> {
   const response = await fetch('/shotai/model-import-log', {
     method: 'POST',
     credentials: 'same-origin',

@@ -1,6 +1,7 @@
 import { chromium } from 'playwright-core'
 import { Document, Packer, Paragraph } from 'docx'
 import mammoth from 'mammoth'
+import * as XLSX from 'xlsx'
 import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { readFile } from 'node:fs/promises'
 
@@ -14,8 +15,15 @@ function planForRequest(payload) {
   const system = payload?.messages?.find((message) => message.role === 'system')?.content || ''
   const user = payload?.messages?.findLast((message) => message.role === 'user')?.content || ''
   const editing = system.includes('当前是修改任务')
-  const word = system.includes('Word Skill')
+  const word = system.includes('Word 文件任务规划器')
   if (word && !editing) {
+    if (user.includes('依据上传表格输出 Word 预算说明')) {
+      if (!user.includes('会议') || !user.includes('300')) throw new Error('Excel reference data was not sent to the document planner')
+      return {
+        mode: 'create', fileName: '预算说明.docx', summary: '已依据表格生成预算说明',
+        blocks: [{ type: 'title', text: '预算说明' }, { type: 'paragraph', text: '会议预算为300。' }],
+      }
+    }
     return {
       mode: 'create',
       fileName: '项目周报.docx',
@@ -72,11 +80,7 @@ async function downloadArtifact(page, namePattern) {
   return readFile(path)
 }
 
-async function activateSkill(page, name) {
-  await page.getByLabel('添加文件或使用我的资料').click()
-  await page.getByRole('menuitem', { name }).click()
-  await page.locator('.composer-skill-strip').getByText(name, { exact: true }).waitFor()
-}
+let routeCount = 0
 
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } })
@@ -105,7 +109,23 @@ try {
       }) })
     }
     if (pathname.endsWith('/chat')) {
-      const plan = planForRequest(request.postDataJSON())
+      const payload = request.postDataJSON()
+      const system = payload.messages.find((message) => message.role === 'system')?.content || ''
+      if (system.includes('任务调度器')) {
+        routeCount += 1
+        const sources = JSON.parse(system.split('\n').at(-1))
+        const kind = routeCount <= 2 || routeCount === 5 ? 'word' : 'pdf'
+        const editing = routeCount === 2 || routeCount === 4
+        const name = kind === 'word' ? '原始说明.docx' : '原始报告.pdf'
+        const choice = editing
+          ? { action: 'edit', kind, sourceId: sources.find((source) => source.name === name)?.id }
+          : { action: 'create', kind, ...(routeCount === 5 ? { sourceId: sources.find((source) => source.name === '预算.xlsx')?.id } : {}) }
+        return route.fulfill({
+          contentType: 'application/x-ndjson',
+          body: JSON.stringify({ message: { content: JSON.stringify(choice) }, done: true }) + '\n',
+        })
+      }
+      const plan = planForRequest(payload)
       return route.fulfill({
         status: 200,
         headers: { 'Content-Type': 'application/x-ndjson' },
@@ -119,8 +139,10 @@ try {
   await page.waitForFunction(() => Boolean(document.querySelector('.model-select')?.textContent?.trim()))
   const editor = page.locator('.composer-textarea')
 
-  await activateSkill(page, 'Word Skill')
-  await editor.fill('生成一份项目周报')
+  await page.getByLabel('添加文件或使用我的资料').click()
+  if (await page.getByRole('menuitem', { name: /Skill/ }).count()) throw new Error('manual Skill entry remains')
+  await page.keyboard.press('Escape')
+  await editor.fill('生成一份 Word 项目周报')
   await editor.press('Enter')
   await page.getByText('已生成项目周报').waitFor({ timeout: 20_000 })
   const createdWord = await downloadArtifact(page, /项目周报\.docx/)
@@ -131,20 +153,22 @@ try {
     new Paragraph('原始 Word 内容'), new Paragraph('需要保留的信息'),
   ] }] })
   const sourceWordBuffer = await Packer.toBuffer(sourceWord)
-  await page.locator('input[type="file"][accept=".docx"]').setInputFiles({
+  await page.locator('input[type="file"].visually-hidden-input').setInputFiles({
     name: '原始说明.docx',
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     buffer: sourceWordBuffer,
   })
   await editor.fill('把正文更新为修改后的 Word 内容')
+  await page.getByRole('button', { name: '发送消息', exact: true }).waitFor()
+  await page.waitForFunction(() => !document.querySelector('.composer-action-button')?.disabled)
   await editor.press('Enter')
   await page.getByText('已修改 Word 内容').waitFor({ timeout: 20_000 })
   const editedWord = await downloadArtifact(page, /修改后的说明\.docx/)
   const editedWordText = (await mammoth.extractRawText({ buffer: editedWord })).value
   if (!editedWordText.includes('修改后的 Word 内容')) throw new Error('Word edit failed')
-  await page.getByLabel('退出 Word Skill').click()
 
-  await activateSkill(page, 'PDF Skill')
+
+
   await editor.fill('生成一份工作清单 PDF')
   await editor.press('Enter')
   await page.getByText('已生成工作清单 PDF').waitFor({ timeout: 20_000 })
@@ -156,14 +180,33 @@ try {
   const sourceFont = await sourcePdf.embedFont(StandardFonts.Helvetica)
   sourcePage.drawText('Original PDF content', { x: 60, y: 760, font: sourceFont, size: 16 })
   const sourcePdfBytes = await sourcePdf.save()
-  await page.locator('input[type="file"][accept=".pdf"]').setInputFiles({
+  await page.locator('input[type="file"].visually-hidden-input').setInputFiles({
     name: '原始报告.pdf', mimeType: 'application/pdf', buffer: Buffer.from(sourcePdfBytes),
   })
   await editor.fill('将报告内容更新为 Updated PDF content')
+  await page.waitForFunction(() => !document.querySelector('.composer-action-button')?.disabled)
   await editor.press('Enter')
-  await page.getByText('已修改 PDF 内容').waitFor({ timeout: 20_000 })
+  await page.getByText('已修改 PDF 内容').waitFor({ timeout: 20_000 }).catch(async (error) => {
+    console.error(await page.locator('.message-stage').innerText())
+    throw error
+  })
   const editedPdf = await downloadArtifact(page, /修改后的报告\.pdf/)
   if ((await PDFDocument.load(editedPdf)).getPageCount() < 1) throw new Error('PDF edit failed')
+
+  const budgetWorkbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(budgetWorkbook, XLSX.utils.aoa_to_sheet([['项目', '金额'], ['会议', 300]]), '预算')
+  await page.locator('input[type="file"].visually-hidden-input').setInputFiles({
+    name: '预算.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    buffer: XLSX.write(budgetWorkbook, { type: 'buffer', bookType: 'xlsx' }),
+  })
+  await page.waitForFunction(() => !document.querySelector('.composer-action-button')?.disabled)
+  await editor.fill('依据上传表格输出 Word 预算说明')
+  await editor.press('Enter')
+  await page.getByText('已依据表格生成预算说明').waitFor({ timeout: 20_000 })
+  const budgetWord = await downloadArtifact(page, /预算说明\.docx/)
+  if (!(await mammoth.extractRawText({ buffer: budgetWord })).value.includes('会议预算为300')) {
+    throw new Error('cross-format Excel to Word generation failed')
+  }
 
   const visibleDateTimes = await page.locator('.message-footer > span:first-child').allInnerTexts()
   if (!visibleDateTimes.some((value) => /\d{4}\/\d{2}\/\d{2}.*\d{2}:\d{2}/.test(value))) {
@@ -171,20 +214,14 @@ try {
   }
 
   await page.getByLabel('打开设置').click()
-  await page.locator('.theme-setting-row').filter({ hasText: '桌面宠物' }).locator('.el-switch').click()
+  if (await page.getByText('桌面宠物', { exact: true }).count()) throw new Error('Removed pet setting remains')
   await page.keyboard.press('Escape')
-  await page.getByLabel('和桌面小猫互动').click()
-  await page.locator('.desktop-pet-panel > strong').waitFor()
-  const timerBefore = await page.locator('.desktop-pet-focus-time').innerText()
-  await page.getByRole('button', { name: '开始专注' }).click()
-  await page.waitForTimeout(1_150)
-  const timerAfter = await page.locator('.desktop-pet-focus-time').innerText()
-  if (timerBefore === timerAfter) throw new Error('desktop pet focus timer did not start')
-
-  await page.screenshot({ path: '/private/tmp/shotai-document-skills-pet.png', fullPage: false })
+  if (await page.locator('.desktop-pet').count()) throw new Error('Removed pet remains on screen')
+  await page.screenshot({ path: '/private/tmp/shotai-document-workflow.png', fullPage: false })
   console.log(JSON.stringify({
-    wordCreate: true, wordEdit: true, pdfCreate: true, pdfEdit: true,
-    messageDateTime: true, desktopPet: true, focusCompanion: true,
+    manualSkillEntry: false, wordCreate: true, wordEdit: true, pdfCreate: true, pdfEdit: true,
+    excelToWord: true,
+    messageDateTime: true, desktopPetRemoved: true,
   }, null, 2))
 } finally {
   await browser.close()

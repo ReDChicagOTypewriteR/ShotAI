@@ -15,7 +15,7 @@ import {
   statSync,
   unlinkSync,
 } from 'node:fs'
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { createServer, request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
@@ -31,6 +31,12 @@ import {
 } from 'node:os'
 import { basename, dirname, extname, join, normalize, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { InferenceScheduler } from './inference-scheduler.mjs'
+import { saveImportDiagnostic } from './import-diagnostics.mjs'
+import { ModelMaintenance, writeTaskEvent } from './model-maintenance.mjs'
+import { inspectModel, loadedModelStatus, runtimeJson } from './model-health.mjs'
+import { normalizeRemoteAddress, constantTimeEqual, parseCookies } from './request-permissions.mjs'
+import { TaskRegistry } from './task-registry.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const projectDirectory =
@@ -116,13 +122,13 @@ const monitorConfig = fileConfig.monitoring || {}
 const concurrencyConfig = fileConfig.concurrency || {}
 const maximumActiveUsers = Math.max(
   1,
-  Math.min(20, Number(process.env.SHOTAI_MAX_ACTIVE_USERS || concurrencyConfig.maxActiveUsers || 5)),
+  Math.min(5, Number(process.env.SHOTAI_MAX_ACTIVE_USERS || concurrencyConfig.maxActiveUsers || 5) || 5),
 )
 const maximumParallelInferences = Math.max(
   1,
   Math.min(
     maximumActiveUsers,
-    Number(process.env.SHOTAI_MAX_PARALLEL_INFERENCES || concurrencyConfig.maxParallelInferences || 2),
+    Number(process.env.SHOTAI_MAX_PARALLEL_INFERENCES || concurrencyConfig.maxParallelInferences || 5) || 5,
   ),
 )
 const monitorUsername = String(
@@ -151,13 +157,27 @@ const modelOperationState = {
   totalBytes: 0,
 }
 globalThis.__shotaiModelOperationState = modelOperationState
-const inferenceQueue = []
-const inferenceLoadState = {
-  running: 0,
-  rejected: 0,
-  completed: 0,
-  totalWaitMs: 0,
-}
+let schedulingResources = { checkedAt: 0, value: null }
+let resourceRefresh = null
+const scheduler = new InferenceScheduler({ maxClients: maximumActiveUsers, ceiling: maximumParallelInferences,
+  resourceProvider: async () => {
+    if (Date.now() - schedulingResources.checkedAt < 2000) return schedulingResources.value
+    if (resourceRefresh) return resourceRefresh
+    resourceRefresh = (async () => {
+      const [gpu, tags, ps] = await Promise.all([
+        readGpuUsage(), runtimeJson(ollamaUrl, '/api/tags').catch(() => ({ models: [] })),
+        runtimeJson(ollamaUrl, '/api/ps').catch(() => ({ models: [] })),
+      ])
+      const loaded = ps.models || []
+      const card = gpu?.devices?.reduce((best, device) => !best || device.memoryTotalBytes - device.memoryUsedBytes > best.memoryTotalBytes - best.memoryUsedBytes ? device : best, null)
+      const value = { gpuTotal: card?.memoryTotalBytes || 0, gpuFree: card ? card.memoryTotalBytes - card.memoryUsedBytes : 0,
+        ramTotal: totalmem(), ramFree: freemem(), loadedVram: loaded.reduce((sum, model) => sum + Number(model.size_vram || 0), 0),
+        loadedRam: loaded.reduce((sum, model) => sum + Math.max(0, Number(model.size || 0) - Number(model.size_vram || 0)), 0), models: tags.models || [], loadedModels: loaded.map(loadedModelStatus) }
+      schedulingResources = { checkedAt: Date.now(), value }; return value
+    })().finally(() => { resourceRefresh = null })
+    return resourceRefresh
+  },
+})
 const localAddresses = new Set(
   Object.values(networkInterfaces())
     .flat()
@@ -218,24 +238,7 @@ function respondMethodNotAllowed(response, allowed) {
 }
 
 function inferenceLoadSnapshot() {
-  return {
-    maxActiveUsers: maximumActiveUsers,
-    maxParallelInferences: maximumParallelInferences,
-    running: inferenceLoadState.running,
-    queued: inferenceQueue.length,
-    available: Math.max(
-      0,
-      maximumActiveUsers - inferenceLoadState.running - inferenceQueue.length,
-    ),
-    rejected: inferenceLoadState.rejected,
-    averageWaitMs: inferenceLoadState.completed
-      ? Math.round(inferenceLoadState.totalWaitMs / inferenceLoadState.completed)
-      : 0,
-  }
-}
-
-function normalizeRemoteAddress(address = '') {
-  return address.replace(/^::ffff:/, '')
+  return scheduler.snapshot()
 }
 
 function canManageRequest(request) {
@@ -246,27 +249,6 @@ function canManageRequest(request) {
 function isHostRequest(request) {
   const remoteAddress = normalizeRemoteAddress(request.socket.remoteAddress)
   return localAddresses.has(remoteAddress)
-}
-
-function constantTimeEqual(left, right) {
-  const leftDigest = createHash('sha256').update(String(left)).digest()
-  const rightDigest = createHash('sha256').update(String(right)).digest()
-  return timingSafeEqual(leftDigest, rightDigest)
-}
-
-function parseCookies(request) {
-  return Object.fromEntries(
-    String(request.headers.cookie || '')
-      .split(';')
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const separator = part.indexOf('=')
-        return separator === -1
-          ? [part, '']
-          : [part.slice(0, separator), decodeURIComponent(part.slice(separator + 1))]
-      }),
-  )
 }
 
 function monitorSession(request) {
@@ -443,7 +425,8 @@ async function readOllamaInference() {
       signal: controller.signal,
       headers: { Accept: 'application/json' },
     })
-    const body = response.ok ? await response.json() : { models: [] }
+    if (!response.ok) throw new Error(`Ollama ps HTTP ${response.status}`)
+    const body = await response.json()
     const loaded = Array.isArray(body.models) ? body.models[0] : null
     if (!loaded) {
       return {
@@ -461,16 +444,18 @@ async function readOllamaInference() {
     }
     const modelBytes = Number(loaded.size || 0)
     const vramBytes = Number(loaded.size_vram || 0)
-    const offload = latestGpuOffload()
     return {
       state: 'running',
-      backend: vramBytes > 0 ? 'gpu' : 'cpu',
+      backend: loadedModelStatus(loaded).backend,
+      evidence: 'ollama-api-ps',
+      loadedModels: body.models.map(loadedModelStatus),
       model: loaded.name || loaded.model || '',
       modelBytes,
       vramBytes,
       contextLength: Number(loaded.context_length || 0),
-      gpuLayers: offload?.gpuLayers || 0,
-      totalLayers: offload?.totalLayers || 0,
+      // Historical runner logs cannot be attributed to the currently loaded model.
+      gpuLayers: 0,
+      totalLayers: 0,
       computeLibrary: ollamaRuntimeComputeLibrary,
       offline: ollamaRuntimeOffline,
     }
@@ -897,7 +882,10 @@ async function appendModelImportFailure(body) {
     mkdirSync(dirname(installModelImportLogPath), { recursive: true })
     appendFileSync(installModelImportLogPath, content, 'utf8')
   }
-  return modelImportLogPath
+  const diagnostic = saveImportDiagnostic(runtimeLogDirectory, content,
+    globalThis.__shotaiOllamaDiagnostic || { pid: ollamaRuntimePid, executable: '外部服务：未知', workingDirectory: '外部服务：未知' },
+    { Ollama: ollamaRuntimeLogPath, ShotAI: join(runtimeLogDirectory, 'desktop.log') })
+  return { ...diagnostic, downloadUrl: `/shotai/model-import-diagnostic/${diagnostic.filename}` }
 }
 
 async function reuseOllamaModelForImages(request, response) {
@@ -1051,16 +1039,16 @@ function proxyLocalService(
   const proxyHeaders = { ...request.headers }
   const operation = options.operation || null
   let upstreamResponse = null
+  let upstreamEnded = false
   let completed = false
   const complete = () => {
     if (completed) return
     completed = true
-    options.onComplete?.()
+    options.onComplete?.(upstreamEnded)
   }
   const cancelUpstream = () => {
     if (completed) return
     finishModelOperation(operation, false, '模型导入连接已中断')
-    complete()
     if (upstreamResponse && !upstreamResponse.destroyed) {
       upstreamResponse.destroy()
     }
@@ -1093,6 +1081,7 @@ function proxyLocalService(
     },
     (proxyResponse) => {
       upstreamResponse = proxyResponse
+      proxyResponse.once('end', () => { upstreamEnded = true })
       response.writeHead(proxyResponse.statusCode || 502, proxyResponse.headers)
       if (operation) {
         proxyResponse.on('data', (chunk) => {
@@ -1128,6 +1117,7 @@ function proxyLocalService(
       error: `无法连接主机上的${options.serviceLabel}：${error.message}`,
     })
   })
+  proxyRequest.once('close', complete)
 
   request.on('aborted', () => {
     cancelUpstream()
@@ -1139,16 +1129,19 @@ function proxyLocalService(
     // concurrency slot do not survive a stopped or closed conversation.
     if (!response.writableEnded) cancelUpstream()
   })
-  request.pipe(proxyRequest)
+  if (options.body) {
+    proxyRequest.end(options.body)
+  } else request.pipe(proxyRequest)
+  return cancelUpstream
 }
 
-function proxyOllamaDirect(request, response, requestUrl, onComplete) {
+function proxyOllamaDirect(request, response, requestUrl, onComplete, body) {
   const trackedOperation =
     request.method === 'POST' &&
     /^\/ollama\/api\/(?:create|blobs\/)/.test(requestUrl.pathname)
       ? beginModelOperation(request, requestUrl)
       : null
-  proxyLocalService(request, response, requestUrl, {
+  return proxyLocalService(request, response, requestUrl, {
     publicPrefix: /^\/ollama/,
     targetUrl: ollamaUrl,
     proxyName: 'lan',
@@ -1156,43 +1149,13 @@ function proxyOllamaDirect(request, response, requestUrl, onComplete) {
     operation: trackedOperation,
     captureStatus: requestUrl.pathname === '/ollama/api/create',
     onComplete,
+    body,
   })
 }
 
 function isScheduledInference(request, requestUrl) {
   return request.method === 'POST' &&
-    /^\/ollama\/api\/(?:chat|generate)$/.test(requestUrl.pathname)
-}
-
-function drainInferenceQueue() {
-  while (
-    inferenceLoadState.running < maximumParallelInferences &&
-    inferenceQueue.length > 0
-  ) {
-    const next = inferenceQueue.shift()
-    if (!next || next.cancelled || next.response.destroyed) continue
-    startScheduledInference(next)
-  }
-}
-
-function finishScheduledInference(item) {
-  if (item.finished) return
-  item.finished = true
-  inferenceLoadState.running = Math.max(0, inferenceLoadState.running - 1)
-  inferenceLoadState.completed += 1
-  inferenceLoadState.totalWaitMs += item.startedAt - item.queuedAt
-  drainInferenceQueue()
-}
-
-function startScheduledInference(item) {
-  item.startedAt = Date.now()
-  inferenceLoadState.running += 1
-  proxyOllamaDirect(
-    item.request,
-    item.response,
-    item.requestUrl,
-    () => finishScheduledInference(item),
-  )
+    /^\/ollama\/api\/(?:chat|generate|embed|embeddings)$/.test(requestUrl.pathname)
 }
 
 function proxyOllama(request, response, requestUrl) {
@@ -1201,55 +1164,107 @@ function proxyOllama(request, response, requestUrl) {
     return
   }
 
-  const active = inferenceLoadState.running + inferenceQueue.length
-  if (active >= maximumActiveUsers) {
-    inferenceLoadState.rejected += 1
-    respondJson(
-      response,
-      429,
-      {
-        error: `当前已有 ${maximumActiveUsers} 位用户正在使用 AI，请稍后重试`,
-        concurrency: inferenceLoadSnapshot(),
-      },
-      { 'Retry-After': '5' },
-    )
-    return
-  }
-
-  const item = {
-    request,
-    response,
-    requestUrl,
-    queuedAt: Date.now(),
-    startedAt: 0,
-    cancelled: false,
-    finished: false,
-  }
-  const cancelQueuedInference = () => {
-    if (item.startedAt) return
-    item.cancelled = true
-    const index = inferenceQueue.indexOf(item)
-    if (index >= 0) inferenceQueue.splice(index, 1)
-  }
-  request.once('aborted', cancelQueuedInference)
-  response.once('close', () => {
-    if (!response.writableEnded) cancelQueuedInference()
-  })
-
-  if (inferenceLoadState.running < maximumParallelInferences) {
-    startScheduledInference(item)
-  } else {
-    inferenceQueue.push(item)
-  }
+  scheduleRequest(request, response, requestUrl, 'text')
 }
 
-function proxyImageRuntime(request, response, requestUrl) {
-  proxyLocalService(request, response, requestUrl, {
+function proxyImageDirect(request, response, requestUrl, onComplete, body) {
+  return proxyLocalService(request, response, requestUrl, {
     publicPrefix: /^\/image/,
     targetUrl: imageRuntimeUrl,
     proxyName: 'shotai-image',
     serviceLabel: '图片创作服务',
+    onComplete, body,
   })
+}
+
+function proxyImageRuntime(request, response, requestUrl) {
+  if (request.method === 'POST' && /^\/image\/(?:v1\/images\/(generations|edits)|sdapi\/v1\/(img2img|txt2img))$/.test(requestUrl.pathname)) {
+    scheduleRequest(request, response, requestUrl, 'image')
+  } else proxyImageDirect(request, response, requestUrl)
+}
+
+function clientIdentity(request) {
+  const id = String(request.headers['x-shotai-client-id'] || '')
+  return /^[a-zA-Z0-9_-]{8,80}$/.test(id) ? id : normalizeRemoteAddress(request.socket.remoteAddress)
+}
+
+async function scheduleRequest(request, response, requestUrl, kind) {
+  const id = randomBytes(16).toString('hex')
+  response.setHeader('X-ShotAI-Task-Id', id)
+  const task = inferenceTasks.create({ id, client: clientIdentity(request), kind })
+  const updateTask = state => inferenceTasks.update(id, state)
+  const job = { client: clientIdentity(request), kind, ready: false, modelBytes: 0, context: 4096,
+    start(done) {
+      updateTask('running')
+      let finished = false
+      const finish = (upstreamEnded = false) => {
+        if (finished) return
+        finished = true
+        updateTask(task.state === 'cancel-requested' ? 'connection-closed' : upstreamEnded && response.statusCode < 400 ? 'completed' : 'failed')
+        done()
+      }
+      const controller = new AbortController()
+      job.abort = () => controller.abort()
+      void (async () => {
+        if (kind === 'image') {
+          // The image barrier owns the slot; release idle LLM residency before diffusion.
+          const ps = await runtimeJson(ollamaUrl, '/api/ps', { signal: controller.signal }).catch(() => ({ models: [] }))
+          for (const model of ps.models || []) {
+            await runtimeJson(ollamaUrl, '/api/generate', { body: { model: model.name || model.model, keep_alive: 0, stream: false }, signal: controller.signal, timeout: 30000 })
+          }
+          schedulingResources.checkedAt = 0
+        }
+        if (controller.signal.aborted || response.destroyed) { finish(); return }
+        job.abort = (kind === 'image' ? proxyImageDirect : proxyOllamaDirect)(request, response, requestUrl, finish, job.body)
+      })().catch((error) => {
+        if (!response.destroyed) respondJson(response, 502, { code: 'GPU_TASK_PREPARE_FAILED', error: error.message })
+        finish()
+      })
+    } }
+  if (!scheduler.enqueue(job)) {
+    updateTask('rejected')
+    respondJson(response, 429, { code: 'INFERENCE_QUEUE_FULL', error: '当前用户额度或客户端等待额度已满，请稍后重试', concurrency: scheduler.snapshot() }, { 'Retry-After': '5' })
+    return
+  }
+  const cancel = () => {
+    if (job.state === 'done') return
+    updateTask(job.state === 'queued' ? 'cancelled-before-start' : 'cancel-requested')
+    scheduler.cancel(job)
+  }
+  request.once('aborted', cancel)
+  response.once('close', () => { if (!response.writableEnded) cancel() })
+  try {
+    const chunks = []; let bytes = 0
+    for await (const chunk of request) {
+      bytes += chunk.length
+      if (bytes > 64 * 1024 * 1024) {
+        scheduler.cancel(job); respondJson(response, 413, { code: 'INFERENCE_BODY_TOO_LARGE', error: '推理请求超过 64 MiB，请缩小图片或上下文' }); return
+      }
+      chunks.push(chunk)
+    }
+    if (job.state === 'done' || response.destroyed) return
+    job.body = Buffer.concat(chunks)
+    let body = {}
+    if (/application\/json/i.test(request.headers['content-type'] || '')) {
+      try { body = JSON.parse(job.body.toString('utf8')) } catch {
+        scheduler.cancel(job); respondJson(response, 400, { code: 'INVALID_JSON', error: '请求格式无效' }); return
+      }
+    }
+    job.model = String(body.model || '')
+    if (kind === 'text' && requestUrl.pathname.endsWith('/generate') && Number(body.width) > 0 && Number(body.height) > 0) job.kind = 'image'
+    job.context = Math.max(2048, Math.min(131072, Number(body.options?.num_ctx) || 4096))
+    // Metadata lookup never loads a model and is bounded; cancelled requests cannot resurrect.
+    const resources = await scheduler.resourceProvider()
+    const normalizeName = (name) => name.includes(':') ? name : `${name}:latest`
+    const model = resources?.models.find((model) => normalizeName(model.name || model.model || '') === normalizeName(job.model))
+    job.modelBytes = Number(model?.size || 0)
+    if (job.state === 'done' || response.destroyed) return
+    job.ready = true
+    scheduler.drain()
+  } catch (error) {
+    scheduler.cancel(job)
+    if (!response.destroyed && !response.headersSent) respondJson(response, 502, { code: 'INFERENCE_PREPARE_FAILED', error: error.message })
+  }
 }
 
 function listImageModelFiles() {
@@ -1424,6 +1439,14 @@ function cleanupModelCache() {
   return { removedFiles, removedBytes }
 }
 
+const inferenceTasks = new TaskRegistry({ record: event => writeTaskEvent(runtimeLogDirectory, event) })
+const maintenance = new ModelMaintenance({ directory: join(dataDirectory, 'maintenance'),
+  list: async () => (await runtimeJson(ollamaUrl, '/api/tags')).models?.map(model => model.name || model.model).filter(Boolean) || [],
+  unload: model => runtimeJson(ollamaUrl, '/api/generate', { body: { model, keep_alive: 0, stream: false }, timeout: 30000 }),
+  remove: model => runtimeJson(ollamaUrl, '/api/delete', { method: 'DELETE', body: { model }, timeout: 30000 }),
+  cleanup: () => cleanupModelCache(),
+})
+
 function resolveStaticFile(pathname, acceptsHtml) {
   let decodedPath
   try {
@@ -1482,8 +1505,80 @@ function serveStatic(request, response, requestUrl) {
   createReadStream(filePath).pipe(response)
 }
 
+async function handleModelHealth(request, response) {
+  if (request.method !== 'POST') { respondMethodNotAllowed(response, 'POST'); return }
+  if (!canManageRequest(request)) { respondJson(response, 403, { code: 'ADMIN_REQUIRED', error: '请在主机上进行模型体检' }); return }
+  const controller = new AbortController()
+  let job
+  response.once('close', () => {
+    if (!response.writableEnded) { controller.abort(); if (job) scheduler.cancel(job) }
+  })
+  try {
+    const chunks = []; let size = 0
+    for await (const chunk of request) {
+      size += chunk.length
+      if (size > 8192) { respondJson(response, 413, { error: '体检参数过大' }); return }
+      chunks.push(chunk)
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString())
+    if (typeof body.model !== 'string' || !body.model.trim() || body.model.length > 200) {
+      respondJson(response, 400, { code: 'INVALID_MODEL', error: '请指定有效模型名称' }); return
+    }
+    const run = async () => {
+      const report = await inspectModel(ollamaUrl, body.model, { probe: body.probe === true, signal: controller.signal })
+      try {
+        mkdirSync(runtimeLogDirectory, { recursive: true })
+        appendFileSync(join(runtimeLogDirectory, 'model-health.jsonl'), `${JSON.stringify(report)}\n`)
+      } catch { /* A read-only installation must not prevent the diagnostic response. */ }
+      if (!response.destroyed) respondJson(response, 200, report)
+    }
+    if (body.probe !== true) { await run(); return }
+    job = { client: clientIdentity(request), kind: 'text', model: body.model, modelBytes: 0, context: 2048, ready: false,
+      abort: () => controller.abort(), start(done) { void run().catch((error) => {
+        if (!response.destroyed) respondJson(response, 502, { error: error.message })
+      }).finally(done) } }
+    if (controller.signal.aborted) return
+    if (!scheduler.enqueue(job)) { respondJson(response, 429, { code: 'INFERENCE_QUEUE_FULL', error: '任务额度已满，请稍后体检' }); return }
+    const resources = await scheduler.resourceProvider()
+    const normalizeName = (name) => name.includes(':') ? name : `${name}:latest`
+    job.modelBytes = Number(resources?.models.find((model) => normalizeName(model.name || model.model || '') === normalizeName(body.model))?.size || 0)
+    if (job.state === 'done' || controller.signal.aborted) return
+    job.ready = true; scheduler.drain()
+  } catch (error) {
+    if (job) scheduler.cancel(job)
+    if (!response.destroyed) respondJson(response, 400, { code: 'MODEL_HEALTH_REQUEST_FAILED', error: error.message })
+  }
+}
+
 const server = createServer(async (request, response) => {
   const requestUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`)
+  if (requestUrl.pathname.startsWith('/shotai/tasks/')) {
+    if (request.method !== 'GET') { respondMethodNotAllowed(response, 'GET'); return }
+    const task = inferenceTasks.get(requestUrl.pathname.slice('/shotai/tasks/'.length))
+    if (!task || (task.client !== clientIdentity(request) && !canManageRequest(request))) { respondJson(response, 404, { code: 'TASK_NOT_FOUND', error: '任务不存在' }); return }
+    respondJson(response, 200, { task }); return
+  }
+  if (requestUrl.pathname === '/shotai/model-maintenance') {
+    if (!canManageRequest(request)) { respondJson(response, 403, { code: 'ADMIN_REQUIRED', error: '模型清理仅供主机管理员使用' }); return }
+    if (request.method === 'GET') { respondJson(response, 200, { job: maintenance.snapshot() }); return }
+    if (request.method !== 'POST') { respondMethodNotAllowed(response, 'POST'); return }
+    if (!ollamaRuntimeIsolated) { respondJson(response, 403, { code: 'RUNTIME_NOT_ISOLATED', error: '不能清理外部或非隔离 Ollama' }); return }
+    try {
+      const body = await readJsonRequest(request, 1024)
+      if (body.confirm !== '清理模型') { respondJson(response, 400, { code: 'CONFIRM_REQUIRED', error: '缺少清理确认' }); return }
+      const load = inferenceLoadSnapshot()
+      if (maintenance.active || modelOperationState.activeCount || load.running || load.queued) { respondJson(response, 409, { code: 'MODEL_BUSY', error: '当前仍有任务，请结束后再清理' }); return }
+      const job = maintenance.start()
+      writeTaskEvent(runtimeLogDirectory, { id: job.id, kind: 'maintenance', state: 'running' })
+      void maintenance.done.then(() => writeTaskEvent(runtimeLogDirectory, { id: job.id, kind: 'maintenance', state: maintenance.snapshot().state }))
+        .catch(error => console.error(`清理任务记录失败：${error.message}`))
+      respondJson(response, 202, { job })
+    } catch (error) { respondJson(response, 500, { code: 'MAINTENANCE_FAILED', error: error.message }) }
+    return
+  }
+  if (maintenance.active && request.method !== 'GET' && /^\/(ollama|image|image-runtime|shotai\/model-import\/files|shotai\/model-cache|shotai\/models\/health)/.test(requestUrl.pathname)) {
+    respondJson(response, 409, { code: 'MODEL_MAINTENANCE_ACTIVE', error: '模型清理正在后台执行，请稍后重试', taskId: maintenance.snapshot().id }); return
+  }
   requestCount += 1
   markClientOnline(request, requestUrl)
 
@@ -1611,6 +1706,19 @@ const server = createServer(async (request, response) => {
     return
   }
 
+  if (requestUrl.pathname === '/shotai/models/health') {
+    await handleModelHealth(request, response)
+    return
+  }
+  if (requestUrl.pathname === '/shotai/models/loaded') {
+    if (request.method !== 'GET') { respondMethodNotAllowed(response, 'GET'); return }
+    try {
+      const ps = await runtimeJson(ollamaUrl, '/api/ps')
+      respondJson(response, 200, { checkedAt: new Date().toISOString(), models: (ps.models || []).map(loadedModelStatus), concurrency: scheduler.snapshot() })
+    } catch (error) { respondJson(response, 503, { code: 'MODEL_STATUS_UNAVAILABLE', error: error.message }) }
+    return
+  }
+
   if (requestUrl.pathname === '/shotai/model-import-log') {
     if (!canManageRequest(request)) {
       respondJson(response, 403, { error: '请在运行 ShotAI 的主机上记录模型导入日志' })
@@ -1622,11 +1730,35 @@ const server = createServer(async (request, response) => {
     }
     try {
       const body = await readJsonRequest(request, 48 * 1024)
-      const path = await appendModelImportFailure(body)
-      respondJson(response, 201, { saved: true, path })
+      const diagnostic = await appendModelImportFailure(body)
+      respondJson(response, 201, { saved: true, ...diagnostic })
     } catch (error) {
       respondJson(response, 500, { error: `导入日志写入失败：${error.message}` })
     }
+    return
+  }
+
+  if (requestUrl.pathname.startsWith('/shotai/model-import-diagnostic/')) {
+    if (!canManageRequest(request)) { respondJson(response, 403, { error: '诊断文件仅供主机管理员查看' }); return }
+    if (request.method !== 'GET') { respondMethodNotAllowed(response, 'GET'); return }
+    const name = requestUrl.pathname.slice('/shotai/model-import-diagnostic/'.length)
+    if (!/^model-import-diagnostic-\d+-[a-f0-9-]+\.log$/.test(name)) { respondJson(response, 400, { error: '无效诊断文件' }); return }
+    const path = join(runtimeLogDirectory, name)
+    if (!existsSync(path)) { respondJson(response, 404, { error: '诊断文件不存在' }); return }
+    response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': `attachment; filename="${name}"`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' })
+    createReadStream(path).pipe(response)
+    return
+  }
+
+  if (requestUrl.pathname === '/shotai/open-log-directory') {
+    if (!isHostRequest(request)) { respondJson(response, 403, { error: '请在主机上打开日志目录' }); return }
+    if (request.method !== 'POST') { respondMethodNotAllowed(response, 'POST'); return }
+    if (typeof globalThis.__shotaiOpenLogDirectory !== 'function') { respondJson(response, 409, { error: `请手动打开 ${runtimeLogDirectory}` }); return }
+    try {
+      const error = await globalThis.__shotaiOpenLogDirectory()
+      if (error) throw new Error(error)
+      respondJson(response, 200, { opened: true })
+    } catch (error) { respondJson(response, 500, { error: error.message }) }
     return
   }
 
@@ -1729,11 +1861,23 @@ const server = createServer(async (request, response) => {
       respondJson(response, 405, { error: '不支持这项操作' })
       return
     }
+    const load = inferenceLoadSnapshot()
+    if (modelOperationState.activeCount > 0 || load.running > 0 || load.queued > 0) {
+      respondJson(response, 409, { error: '当前仍有模型导入或推理任务，请等待所有任务结束后再清理' })
+      return
+    }
     respondJson(response, 200, cleanupModelCache())
     return
   }
 
   if (requestUrl.pathname === '/ollama' || requestUrl.pathname.startsWith('/ollama/')) {
+    if (request.method === 'DELETE') {
+      const load = inferenceLoadSnapshot()
+      if (modelOperationState.activeCount > 0 || load.running > 0 || load.queued > 0) {
+        respondJson(response, 409, { error: '模型仍有导入或推理任务，请等待所有任务结束后再删除' })
+        return
+      }
+    }
     if (isProtectedOllamaRequest(request, requestUrl) && !canManageRequest(request)) {
       respondJson(response, 403, { error: '模型由主机管理员统一管理' })
       return

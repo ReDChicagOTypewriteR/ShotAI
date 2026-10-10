@@ -85,6 +85,8 @@ try {
     /监控平台只能在运行 ShotAI 的主机上访问/,
   )
   assert.match(serverSource, /if \(!monitorSession\(request\)\)/)
+  assert.match(serverSource, /backend: loadedModelStatus\(loaded\).backend/)
+  assert.match(serverSource, /const vramBytes = Number\(loaded\.size_vram \|\| 0\)/)
 
   console.log(JSON.stringify({
     monitorPlatform: true,
@@ -92,6 +94,7 @@ try {
     authenticated: true,
     methodMismatchExplained: true,
     inferenceBackendReported: true,
+    gpuRequiresActualVramUsage: true,
     modelImportProtectionReported: true,
     lanMonitorLoginRequired: true,
   }))

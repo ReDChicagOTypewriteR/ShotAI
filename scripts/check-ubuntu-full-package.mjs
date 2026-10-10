@@ -9,14 +9,6 @@ const projectDirectory = dirname(dirname(fileURLToPath(import.meta.url)))
 const runtimeDirectory = join(projectDirectory, 'vendor', 'ollama', 'linux')
 const executablePath = join(runtimeDirectory, 'bin', 'ollama')
 const libraryDirectory = join(runtimeDirectory, 'lib', 'ollama')
-const imageRuntimeDirectory = join(
-  projectDirectory,
-  'vendor',
-  'stable-diffusion.cpp',
-  'linux',
-)
-const imageExecutablePath = join(imageRuntimeDirectory, 'sd-server')
-const ncclLibraryPath = join(imageRuntimeDirectory, 'libnccl.so.2')
 const packageJson = JSON.parse(
   await readFile(join(projectDirectory, 'package.json'), 'utf8'),
 )
@@ -34,10 +26,6 @@ for (const path of [
   libraryDirectory,
   join(runtimeDirectory, 'LICENSE.ollama.txt'),
   join(runtimeDirectory, 'SHOTAI_OLLAMA_RUNTIME_INFO.txt'),
-  imageExecutablePath,
-  ncclLibraryPath,
-  join(imageRuntimeDirectory, 'LICENSE.stable-diffusion.cpp.txt'),
-  join(imageRuntimeDirectory, 'SHOTAI_RUNTIME_INFO.txt'),
   join(projectDirectory, 'desktop', 'electron', 'after-install-linux.sh'),
 ]) {
   await access(path, constants.R_OK)
@@ -50,42 +38,16 @@ await executable.close()
 assert.deepEqual([...elfMagic], [0x7f, 0x45, 0x4c, 0x46])
 assert.ok((await stat(executablePath)).mode & 0o111, 'Ollama 缺少执行权限')
 
-const imageExecutable = await open(imageExecutablePath, 'r')
-const imageElfHeader = Buffer.alloc(20)
-await imageExecutable.read(imageElfHeader, 0, imageElfHeader.length, 0)
-await imageExecutable.close()
-assert.deepEqual([...imageElfHeader.subarray(0, 4)], [0x7f, 0x45, 0x4c, 0x46])
-assert.equal(imageElfHeader[4], 2, '图片运行组件不是 64 位 ELF')
-assert.equal(imageElfHeader.readUInt16LE(18), 62, '图片运行组件不是 x86_64 ELF')
-assert.ok(
-  (await stat(imageExecutablePath)).mode & 0o111,
-  '图片运行组件缺少执行权限',
-)
-const ncclLibrary = await open(ncclLibraryPath, 'r')
-const ncclElfHeader = Buffer.alloc(20)
-await ncclLibrary.read(ncclElfHeader, 0, ncclElfHeader.length, 0)
-await ncclLibrary.close()
-assert.deepEqual([...ncclElfHeader.subarray(0, 4)], [0x7f, 0x45, 0x4c, 0x46])
-assert.equal(ncclElfHeader[4], 2, 'NCCL 运行库不是 64 位 ELF')
-assert.equal(ncclElfHeader.readUInt16LE(18), 62, 'NCCL 运行库不是 x86_64 ELF')
-const imageRuntimeInfo = await readFile(
-  join(imageRuntimeDirectory, 'SHOTAI_RUNTIME_INFO.txt'),
-  'utf8',
-)
-assert.match(imageRuntimeInfo, /CUDA 12\.4/)
-assert.match(imageRuntimeInfo, /sm_70/)
-assert.match(imageRuntimeInfo, /97d2990/)
-
 const libraryEntries = await readdir(libraryDirectory, { recursive: true })
 assert.ok(libraryEntries.length > 5, 'Ollama Linux GPU 运行库不完整')
 assert.ok(
-  libraryEntries.some((entry) => /cuda/i.test(entry)),
-  'Ollama Linux 包缺少 CUDA 运行库',
+  libraryEntries.some((entry) => entry.startsWith('cuda_v12/')),
+  'Ollama Linux 包缺少 CUDA 12 运行库',
 )
 
 assert.equal(
   fullConfig.linux.artifactName,
-  'ShotAI-${version}-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.${ext}',
+  'ShotAI-${version}-Ubuntu-22.04-x86_64-Ollama-CUDA12.${ext}',
 )
 assert.equal(fullConfig.directories.output, 'release/ubuntu')
 assert.ok(
@@ -93,18 +55,13 @@ assert.ok(
     (resource) =>
       resource.from === 'vendor/ollama/linux' &&
       resource.filter.includes('bin/ollama') &&
-      resource.filter.includes('lib/ollama/**/*'),
+      resource.filter.includes('lib/ollama/**/*') &&
+      resource.filter.includes('!lib/ollama/cuda_v13/**') &&
+      resource.filter.includes('!lib/ollama/vulkan/**') &&
+      resource.filter.includes('lib/ollama/cuda_v12/**/*'),
   ),
 )
-assert.ok(
-  fullConfig.extraResources.some(
-    (resource) =>
-      resource.from === 'vendor/stable-diffusion.cpp/linux' &&
-      resource.to === 'runtime/image' &&
-      resource.filter.includes('sd-server') &&
-      resource.filter.includes('libnccl.so.2'),
-  ),
-)
+assert.ok(!fullConfig.extraResources.some((resource) => resource.to === 'runtime/image'))
 assert.ok(mainSource.includes("[name, join('bin', name)]"))
 assert.ok(mainSource.includes('findPrivateOllamaUrl'))
 assert.ok(mainSource.includes('SHOTAI_OLLAMA_MODEL_DIRECTORY'))
@@ -117,7 +74,7 @@ assert.ok(mainSource.includes("'runtime',\n    'ollama',\n    'lib',\n    'ollam
 assert.ok(mainSource.includes('LD_LIBRARY_PATH: imageLibraryPath'))
 assert.ok(mainSource.includes("OLLAMA_LLM_LIBRARY: preferredComputeLibrary"))
 assert.ok(mainSource.includes("OLLAMA_NO_CLOUD: 'true'"))
-assert.ok(mainSource.includes("process.env.OLLAMA_CONTEXT_LENGTH || '8192'"))
+assert.ok(mainSource.includes("process.env.OLLAMA_CONTEXT_LENGTH || '4096'"))
 assert.ok(mainSource.includes("process.kill(-child.pid, 'SIGTERM')"))
 assert.ok(mainSource.includes('confirmQuitDuringModelImport'))
 assert.ok(mainSource.includes('cleanupInterruptedOllamaCopies'))
@@ -141,12 +98,14 @@ console.log(
       bundledModels: false,
       isolatedOllamaRuntime: true,
       oldServiceConflictGuard: true,
-      installDirectoryLogs: true,
+      desktopPreferredLogs: true,
       v100Cuda12Pinned: true,
       offlineCloudRequestsDisabled: true,
       importExitProtection: true,
       interruptedCopyCleanup: true,
-      imageRuntime: 'bundled CUDA 12.4 sm_70 sd-server',
+      imageRuntime: 'optional extension',
+      cuda13Included: false,
+      vulkanIncluded: false,
     },
     null,
     2,

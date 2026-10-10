@@ -125,6 +125,8 @@ export interface LocalArtifactRecord {
   size: number
   createdAt: number
   blob: Blob
+  text?: string
+  truncated?: boolean
 }
 
 export function saveLocalArtifact(artifact: LocalArtifactRecord) {

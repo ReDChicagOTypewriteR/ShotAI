@@ -66,6 +66,12 @@ try {
       })
     }
     if (pathname.endsWith('/chat')) {
+      if (request.postDataJSON().messages?.some((message) => message.role === 'system' && message.content.includes('任务调度器'))) {
+        return route.fulfill({
+          contentType: 'application/x-ndjson',
+          body: JSON.stringify({ message: { content: '{"action":"chat"}' }, done: true }) + '\n',
+        })
+      }
       chatRequestCount += 1
       if (chatRequestCount === 3) {
         const longAnswer = Array.from(
@@ -373,9 +379,9 @@ try {
   if (
     !lightThemeMetrics ||
     !lightThemeMetrics.rootClass.includes('theme-light') ||
-    lightThemeMetrics.themeText !== '#121722' ||
+    lightThemeMetrics.themeText !== '#19191c' ||
     lightThemeMetrics.drawerColor !== lightThemeMetrics.textColor ||
-    !lightThemeMetrics.drawerBackground.includes('1 1 1')
+    !/color\(srgb 1 1 (?:1|0\.99)/.test(lightThemeMetrics.drawerBackground)
   ) {
     throw new Error(
       `teleported settings did not receive light theme: ${JSON.stringify(lightThemeMetrics)}`,

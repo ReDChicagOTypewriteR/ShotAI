@@ -210,6 +210,7 @@ export async function generateImageWithLocalRuntime(
       method: 'POST',
       credentials: 'same-origin',
       headers: {
+        ...clientHeaders(),
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
@@ -272,6 +273,7 @@ export async function editImageWithLocalRuntime(
       method: 'POST',
       credentials: 'same-origin',
       headers: {
+        ...clientHeaders(),
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
@@ -315,3 +317,4 @@ export async function editImageWithLocalRuntime(
   }
   return { dataUrl: toGeneratedImageDataUrl(image) }
 }
+import { clientHeaders } from './clientIdentity'

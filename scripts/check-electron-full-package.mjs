@@ -20,7 +20,6 @@ for (const path of [
   'resources/runtime/ollama/lib/ollama/libllama-quantize-impl.dll',
   'resources/runtime/ollama/lib/ollama/libllama-server-impl.dll',
   'resources/runtime/ollama/lib/ollama/cuda_v12/ggml-cuda.dll',
-  'resources/runtime/image/sd-server.exe',
   'resources/shotai/server/serve-lan.mjs',
 ]) {
   await access(join(unpackedDirectory, path), constants.R_OK)
@@ -40,6 +39,10 @@ await assert.rejects(
     join(unpackedDirectory, 'resources/runtime/ollama/lib/ollama/vulkan'),
     constants.F_OK,
   ),
+)
+await assert.rejects(
+  access(join(unpackedDirectory, 'resources/runtime/image'), constants.F_OK),
+  '图片运行组件应只放在可选扩展中',
 )
 
 const modelExtensions = new Set([
@@ -74,7 +77,7 @@ console.log(
       ollamaIncluded: true,
       llamaQuantizeIncluded: true,
       llamaServerIncluded: true,
-      imageRuntimeIncluded: true,
+      imageRuntimeIncluded: false,
       cuda12Included: true,
       cuda13Included: false,
       vulkanIncluded: false,

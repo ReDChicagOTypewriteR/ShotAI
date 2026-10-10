@@ -62,6 +62,9 @@ const server = createServer(async (request, response) => {
   }
   if (request.method === 'POST' && url.pathname === '/api/chat') {
     const payload = JSON.parse((await body(request)).toString() || '{}')
+    if (payload.messages?.some((message) => message.role === 'system' && message.content.includes('任务调度器'))) {
+      return ndjson(response, [{ message: { role: 'assistant', content: '{"action":"chat"}' }, done: true }])
+    }
     if (payload.think) {
       return json(response, 400, {
         error: `"${payload.model}" does not support thinking`,

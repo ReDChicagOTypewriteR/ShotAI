@@ -141,6 +141,33 @@ try {
 
   await page.keyboard.press('Escape')
   await page.getByLabel('打开设置').click()
+  await page.getByRole('button', { name: /日常对话/ }).click()
+  await modelDrawer.getByRole('button', { name: '添加模型', exact: true }).click()
+  await page.route('**/image-runtime/models/*', route => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: '测试：磁盘写入失败' }) }))
+  await page.route('**/shotai/model-import-log', route => route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ saved: true, path: '/home/z/桌面/ShotAI-logs/test.log', downloadUrl: '/shotai/model-import-diagnostic/test.log' }) }))
+  await dialog.locator('input[type="file"]').setInputFiles([
+    { name: 'flux-2-klein-4b-Q4_0.gguf', mimeType: 'application/octet-stream', buffer: createMetadataFreeGguf() },
+    { name: 'Qwen3-4B-Q4_K_M.gguf', mimeType: 'application/octet-stream', buffer: createMetadataFreeGguf() },
+    { name: 'flux2-vae.safetensors', mimeType: 'application/octet-stream', buffer: Buffer.alloc(64) },
+  ])
+  await dialog.getByRole('button', { name: '下一步' }).click()
+  await dialog.getByRole('button', { name: '下一步' }).click()
+  await dialog.getByRole('button', { name: '开始导入' }).click()
+  const failure = dialog.getByRole('alert', { name: '模型导入失败详情' })
+  await failure.waitFor()
+  await failure.getByRole('link', { name: '导出诊断文件' }).waitFor()
+  await failure.getByRole('button', { name: '查看错误详情' }).click()
+  await failure.getByText(/测试：磁盘写入失败/).waitFor()
+  await failure.getByRole('button', { name: '重试导入' }).waitFor()
+  await page.setViewportSize({ width: 375, height: 812 })
+  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'dark' })
+  await failure.getByRole('link', { name: '导出诊断文件' }).scrollIntoViewIfNeeded()
+  await page.screenshot({ path: '/private/tmp/shotai-import-failure.png' })
+  await page.setViewportSize({ width: 1360, height: 900 })
+  await dialog.getByRole('button', { name: '取消', exact: true }).click()
+
+  await page.keyboard.press('Escape')
+  await page.getByLabel('打开设置').click()
   await page.getByText('模型临时文件', { exact: true }).waitFor()
 
   console.log(
@@ -156,6 +183,8 @@ try {
         onePassChatModelImport: true,
         missingImageRuntimeKeepsImportedModel: true,
         missingImageRuntimeNotLoggedAsImportFailure: true,
+        failureDiagnosticVisible: true,
+        persistentErrorDetails: true,
       },
       null,
       2,

@@ -2,12 +2,12 @@
 
 ## 下载
 
-从 [GitHub Releases](https://github.com/ReDChicagOTypewriteR/ShotAI/releases) 下载对应平台的正式安装包。安装包不包含模型权重。
+正式发布后可从 [GitHub Releases](https://github.com/ReDChicagOTypewriteR/ShotAI/releases) 下载对应平台的安装包；下表是当前源码构建使用的文件名，不代表这些文件已上传。安装包不包含模型权重。
 
-| 平台 | 1.2.0 安装包 |
+| 平台 | 1.3.0 安装包（实机测试预发布） |
 | --- | --- |
-| Windows 10/11 x86_64 | `ShotAI-1.2.0-Windows-x64-Full-CUDA12-Setup.exe` |
-| Ubuntu 22.04 LTS x86_64 | `ShotAI-1.2.0-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb` |
+| Windows 10/11 x86_64 | `ShotAI-1.3.0-Windows-x64-Ollama-CUDA12-Setup.exe` |
+| Ubuntu 22.04 LTS x86_64 | `ShotAI-1.3.0-Ubuntu-22.04-x86_64-Ollama-CUDA12.deb` / `.AppImage` |
 
 ## Windows 安装
 
@@ -17,26 +17,32 @@
 4. 在主机的“模型管理”中导入模型；
 5. 将界面显示的 `http://主机IPv4地址:9090` 提供给可信局域网使用者。
 
-Windows 完整版包含 Ollama CUDA 12 与图片运行组件，不包含模型权重。关闭主窗口后，ShotAI 默认继续在托盘运行；需要停止局域网服务时，请从托盘完全退出。
+Windows 安装包包含 Ollama CUDA 12，不包含模型权重或图片运行组件。关闭主窗口后，ShotAI 默认继续在托盘运行；需要停止局域网服务时，请从托盘完全退出。
 
 ## Ubuntu 22.04 离线安装
 
 将 DEB 复制到 Ubuntu 主机，在文件所在目录打开终端：
 
 ```bash
-sudo dpkg -i ShotAI-1.2.0-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.deb
+sudo dpkg -i ShotAI-1.3.0-Ubuntu-22.04-x86_64-Ollama-CUDA12.deb
 shotai
 ```
 
 也可以右键 DEB 并选择系统的软件安装工具。若双击进入压缩包或没有反应，使用上面的 `dpkg` 方式。
 
-Ubuntu 完整版包含独立 Ollama、CUDA 运行库和面向 NVIDIA V100（sm_70）构建的 Linux 图片运行器，不包含模型权重或 NVIDIA 驱动。需要 GPU 推理时，应先安装与显卡匹配的 NVIDIA 驱动，并确认：
+Ubuntu 安装包包含独立 Ollama 及 CUDA 12 运行库，排除 CUDA 13 和 Vulkan，不包含图片运行组件、模型权重或 NVIDIA 驱动。需要 GPU 推理时，应先安装与显卡匹配的 NVIDIA 驱动，并确认：
 
 ```bash
 nvidia-smi
 ```
 
-图片模型导入后会直接使用安装包内的 `sd-server`。启动记录写入 `~/.config/ShotAI/data/logs/image-runtime.log`；应以日志中的 CUDA 后端初始化结果和实际显存占用判断是否使用 GPU，不能只依据系统检测到显卡。
+1.3.0 主机“模型管理”提供“检测加载”和“运行体检”，体检记录为运行日志目录中的 `model-health.jsonl`。桌面客户端优先将日志写入桌面 `ShotAI-logs`，不可写时回退到数据目录 `logs`。体检区分模型已安装、实际驻留、CPU / GPU 混合和短推理失败；运行库配置不是 CUDA 实际加载证明。
+
+最多接纳五个客户端；每个客户端最多一条运行、一条等待，轮流调度。并发根据模型大小、上下文和可用显存 / 内存保守估算，未知模型按单任务处理。图片生成 / 修改独占推理时段，并在开始前释放 Ollama 驻留模型。图片服务自身可能保留权重显存，后续聊天仍可能发生 CPU 回退；请以体检和实机监控为准。
+
+升级保留已有 `lan.config.json`。旧配置的 `concurrency.maxParallelInferences: 2` 仍是上限；新安装默认上限为 5，而不是始终并行 5 条。调整该值后需完全退出并重启 ShotAI。额度估算控制的是 ShotAI 请求放行；Ollama 的内部并行槽与缓存分配仍受启动配置限制，不能等同于精确的显存预测或 V100 性能保证。
+
+图片功能需单独安装同平台的可选扩展：将扩展目录 `runtime/image` 内的文件复制到 ShotAI 数据目录下的 `runtime/image`，Ubuntu 还需为 `sd-server` 添加执行权限，随后重启 ShotAI。启动记录写入运行日志目录的 `image-runtime.log`；应以日志中的 CUDA 后端初始化结果和实际显存占用判断是否使用 GPU，不能只依据系统检测到显卡。
 
 ## 第一次启动
 
@@ -46,7 +52,7 @@ nvidia-smi
 4. 需要 GPU 时，在主机监控中确认显存占用和 GPU 推理状态；
 5. 从另一台局域网设备打开 `http://主机IPv4地址:9090`。
 
-默认最多接纳五条活跃请求：两条同时推理、三条等待。管理员可在数据目录的 `lan.config.json` 中调整容量，修改后需要完全退出并重新启动 ShotAI。
+默认最多接纳五个活跃客户端，实际并行数量按资源保守估算。管理员可在数据目录的 `lan.config.json` 中调整上限，修改后需要完全退出并重新启动 ShotAI。
 
 ## 数据与日志
 
@@ -89,7 +95,9 @@ nvidia-smi
 ```bash
 npm run release:windows
 npm run release:ubuntu
+npm run release:image:windows
+npm run release:image:ubuntu
 ```
 
-需要顺序生成两套安装包时使用 `npm run release:all`。Windows 产物只写入
+发布前可运行 `npm run check:release`。需要顺序生成两套安装包和可选图片扩展时使用 `npm run release:all`。Windows 产物只写入
 `release/windows`，Ubuntu 产物只写入 `release/ubuntu`。

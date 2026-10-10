@@ -106,6 +106,9 @@ try {
     join(projectDirectory, 'scripts', 'serve-lan.mjs'),
     join(testDirectory, 'server.mjs'),
   )
+  for (const file of ['inference-scheduler.mjs', 'model-health.mjs', 'import-diagnostics.mjs', 'model-maintenance.mjs', 'request-permissions.mjs', 'task-registry.mjs']) {
+    await cp(join(projectDirectory, 'scripts', file), join(testDirectory, file))
+  }
   await writeFile(
     join(testDirectory, 'lan.config.json'),
     JSON.stringify({
@@ -142,7 +145,8 @@ try {
   assert.ok(system.ollama.modelDirectory)
   assert.ok(system.logs.directory)
   assert.equal(system.concurrency.maxActiveUsers, 5)
-  assert.equal(system.concurrency.maxParallelInferences, 2)
+  assert.equal(system.concurrency.maxParallelInferences, 1)
+  assert.equal(system.concurrency.configuredCeiling, 2)
 
   const chatModel = createTestGguf()
   const chatSha256 = createHash('sha256').update(chatModel).digest('hex')
@@ -170,7 +174,7 @@ try {
     Array.from({ length: 6 }, (_, index) =>
       fetch(`http://127.0.0.1:${port}/ollama/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-ShotAI-Client-Id': `parallel_${index}` },
         body: JSON.stringify({ model: 'qwen3.5-test', prompt: String(index) }),
       }),
     ),
@@ -178,34 +182,39 @@ try {
   const concurrentStatuses = concurrentResponses.map((response) => response.status)
   assert.equal(concurrentStatuses.filter((status) => status === 200).length, 5)
   assert.equal(concurrentStatuses.filter((status) => status === 429).length, 1)
-  assert.equal(maximumObservedInference, 2)
+  assert.equal(maximumObservedInference, 1)
 
   const runningControllerA = new AbortController()
   const runningControllerB = new AbortController()
   const queuedController = new AbortController()
+  let cancellationClient = 0
   const cancellableChat = (controller) =>
     fetch(`http://127.0.0.1:${port}/ollama/api/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-ShotAI-Test-Delay': 'slow',
+        'X-ShotAI-Client-Id': `cancel_${++cancellationClient}`,
       },
       body: JSON.stringify({ model: 'qwen3.5-test', prompt: 'cancel-test' }),
       signal: controller.signal,
     }).catch((error) => error)
   const runningRequestA = cancellableChat(runningControllerA)
   const runningRequestB = cancellableChat(runningControllerB)
-  await waitForConcurrency({ running: 2, queued: 0 })
+  await waitForConcurrency({ running: 1, queued: 1 })
   const queuedRequest = cancellableChat(queuedController)
-  await waitForConcurrency({ running: 2, queued: 1 })
+  await waitForConcurrency({ running: 1, queued: 2 })
 
   queuedController.abort()
   await queuedRequest
-  await waitForConcurrency({ running: 2, queued: 0 })
+  await waitForConcurrency({ running: 1, queued: 1 })
 
   runningControllerA.abort()
   await runningRequestA
   await waitForConcurrency({ running: 1, queued: 0 })
+  runningControllerB.abort()
+  await runningRequestB
+  await waitForConcurrency({ running: 0, queued: 0 })
   const replacementStartedAt = Date.now()
   const replacementResponse = await fetch(
     `http://127.0.0.1:${port}/ollama/api/chat`,
@@ -290,7 +299,7 @@ try {
         onePassChatModelImport: true,
         isolatedBlobFastPath: true,
         fiveUserAdmissionLimit: true,
-        twoRequestGpuParallelism: true,
+      unknownModelConservativeSerialism: true,
         queuedRequestCancellation: true,
         runningRequestCancellation: true,
         cancelledSlotReleasedImmediately: true,

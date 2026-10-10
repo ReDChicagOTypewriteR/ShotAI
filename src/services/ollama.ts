@@ -1,4 +1,5 @@
 import { createSHA256 } from 'hash-wasm'
+import { clientHeaders } from './clientIdentity'
 
 export const OLLAMA_API_BASE =
   import.meta.env.VITE_OLLAMA_BASE_URL?.replace(/\/$/, '') || '/ollama/api'
@@ -145,6 +146,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
       credentials: 'same-origin',
       headers: {
         Accept: 'application/json',
+        ...clientHeaders(),
         ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
         ...init?.headers,
       },
@@ -217,6 +219,11 @@ export async function showOllamaModel(model: string) {
 }
 
 export async function deleteOllamaModel(model: string) {
+  // Deleting the manifest alone may leave a loaded runner usable until expiry.
+  await requestJson('/generate', {
+    method: 'POST',
+    body: JSON.stringify({ model, keep_alive: 0, stream: false }),
+  })
   let response: Response
   try {
     response = await fetch(`${OLLAMA_API_BASE}/delete`, {
@@ -258,6 +265,7 @@ export async function chatWithOllama(
   options: {
     signal?: AbortSignal
     think?: boolean
+    format?: 'json'
     generation?: OllamaGenerationOptions
     onContent: (content: string) => void
     onThinking?: (thinking: string) => void
@@ -270,11 +278,12 @@ export async function chatWithOllama(
       return await fetch(`${OLLAMA_API_BASE}/chat`, {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...clientHeaders() },
         body: JSON.stringify({
           model,
           messages,
           stream: true,
+          ...(options.format ? { format: options.format } : {}),
           ...(typeof think === 'boolean' ? { think } : {}),
           keep_alive: '5m',
           options: options.generation,
@@ -338,6 +347,7 @@ export async function generateImageWithOllama(
       credentials: 'same-origin',
       headers: {
         Accept: 'application/x-ndjson, application/json',
+        ...clientHeaders(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -588,12 +598,16 @@ export async function createOllamaModel(
   } catch (error) {
     if (
       error instanceof OllamaApiError &&
-      /failed to validate GGUF with llama-quantize|unknown model architecture/i.test(
+      /failed to validate GGUF with llama-quantize|unknown model architecture|cannot get current path/i.test(
         error.message,
       )
     ) {
       throw new OllamaApiError(
-        '这个 GGUF 文件没有通过完整检查。请确认文件下载完整；如果是图片模型，请同时选择同一下载页、同一版本的主模型和 mmproj 配套文件。',
+        `${/cannot get current path/i.test(error.message)
+          ? '模型运行进程的工作目录已失效，请从托盘退出 ShotAI 后重新启动。'
+          : /unknown model architecture/i.test(error.message)
+            ? '当前运行组件不支持此模型架构；这不代表模型文件下载损坏。'
+            : '运行组件的 GGUF 校验失败，可能是格式兼容、文件完整性或校验进程异常，请查看下面的原始错误。'}\n原始错误：${error.message}`,
         error.status,
       )
     }

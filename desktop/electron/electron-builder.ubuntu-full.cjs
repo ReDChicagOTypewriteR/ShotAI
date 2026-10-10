@@ -14,24 +14,19 @@ module.exports = {
       filter: [
         'bin/ollama',
         'lib/ollama/**/*',
+        'lib/ollama/cuda_v12/**/*',
+        '!lib/ollama/cuda_v13/**',
+        '!lib/ollama/cuda_v13',
+        '!lib/ollama/vulkan/**',
+        '!lib/ollama/vulkan',
         'LICENSE.ollama.txt',
         'SHOTAI_OLLAMA_RUNTIME_INFO.txt',
-      ],
-    },
-    {
-      from: 'vendor/stable-diffusion.cpp/linux',
-      to: 'runtime/image',
-      filter: [
-        'sd-server',
-        'libnccl.so.2',
-        'LICENSE.stable-diffusion.cpp.txt',
-        'SHOTAI_RUNTIME_INFO.txt',
       ],
     },
   ],
   linux: {
     ...build.linux,
     artifactName:
-      'ShotAI-${version}-Ubuntu-22.04-x86_64-Full-Ollama-CUDA.${ext}',
+      'ShotAI-${version}-Ubuntu-22.04-x86_64-Ollama-CUDA12.${ext}',
   },
 }

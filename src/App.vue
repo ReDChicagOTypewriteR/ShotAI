@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import ImportFailurePanel from './components/ImportFailurePanel.vue'
+import PendingDocument from './components/PendingDocument.vue'
 import {
   computed,
+  defineAsyncComponent,
   nextTick,
   onBeforeUnmount,
   onMounted,
@@ -8,6 +11,7 @@ import {
   ref,
   watch,
 } from 'vue'
+const ModelHealthPanel = defineAsyncComponent(() => import('./components/ModelHealthPanel.vue'))
 import {
   ArrowRight,
   Check,
@@ -97,16 +101,15 @@ import {
   executeExcelSkillPlan,
   parseExcelSkillPlan,
   previewExcelWorkbook,
-  validateExcelSkillSourceFile,
 } from './services/excelSkill'
 import {
   createDocumentSkillMessages,
   executeDocumentSkillPlan,
   parseDocumentSkillPlan,
   previewDocumentSkillFile,
-  validateDocumentSkillSourceFile,
 } from './services/documentSkill'
-import type { DocumentSkillKind } from './services/documentSkill'
+import { createOfficeContext, createOfficeRouteMessages, parseOfficeRoute } from './services/officeTasks'
+import type { OfficeSource } from './services/officeTasks'
 import {
   chunkKnowledgeText,
   createKnowledgeBase,
@@ -134,6 +137,7 @@ import {
 import type { ImageRuntimeStatus } from './services/image-runtime'
 import {
   cleanupModelCache,
+  modelMaintenance,
   getMonitorSession,
   getMonitorSnapshot,
   getShotAISystemInfo,
@@ -148,7 +152,6 @@ type ModelStatus = 'ready' | 'sleeping' | 'checking'
 type OllamaConnectionState = 'checking' | 'online' | 'degraded' | 'offline'
 type ImageCanvas = 'square' | 'landscape' | 'portrait'
 type ComposerMode = 'chat' | 'image'
-type ComposerSkill = 'excel' | 'word' | 'pdf' | null
 type ImageConversationIntent = 'chat' | 'generate' | 'edit'
 
 interface RagSource {
@@ -213,7 +216,6 @@ interface DemoMessage {
   images?: MessageImage[]
   attachments?: MessageAttachment[]
   artifacts?: MessageArtifact[]
-  skillId?: 'excel' | 'word' | 'pdf'
   modelId?: string
   modelName?: string
   generationType?: 'chat' | 'image'
@@ -283,7 +285,6 @@ interface WorkspaceState {
   activeConversation: string
   darkMode: boolean
   showReasoning?: boolean
-  desktopPetEnabled?: boolean
   conversations: ConversationRecord[]
 }
 
@@ -380,7 +381,6 @@ const importStatus = ref('')
 const senderRef = ref<HTMLTextAreaElement | null>(null)
 const senderText = ref('')
 const composerMode = ref<ComposerMode>('chat')
-const activeComposerSkill = ref<ComposerSkill>(null)
 const bubbleListRef = ref<BubbleListExpose | null>(null)
 let messageScrollFrame = 0
 
@@ -412,30 +412,8 @@ const attachmentProcessing = ref(false)
 const attachmentDragActive = ref(false)
 const pendingImages = ref<MessageImage[]>([])
 const pendingAttachments = ref<MessageAttachment[]>([])
-const excelSkillSourceFiles = new Map<string, File>()
-const documentSkillSourceFiles = new Map<string, File>()
-const desktopPetEnabled = ref(false)
-const desktopPetReacting = ref(false)
-const desktopPetMessage = ref('今天也一起专心工作吧')
-const desktopPetPanelOpen = ref(false)
-const focusSessionRunning = ref(false)
-const focusSessionRemaining = ref(25 * 60)
-let focusSessionTimer: number | undefined
-let desktopPetReactionTimer: number | undefined
 
-const activeSkillLabel = computed(() => {
-  if (activeComposerSkill.value === 'excel') return 'Excel Skill'
-  if (activeComposerSkill.value === 'word') return 'Word Skill'
-  if (activeComposerSkill.value === 'pdf') return 'PDF Skill'
-  return ''
-})
-
-const activeSkillAccept = computed(() => {
-  if (activeComposerSkill.value === 'excel') return '.xlsx,.xls,.csv'
-  if (activeComposerSkill.value === 'word') return '.docx'
-  if (activeComposerSkill.value === 'pdf') return '.pdf'
-  return 'image/jpeg,image/png,image/webp,.txt,.md,.markdown,.pdf,.doc,.docx,.xls,.xlsx,.xlsm,.csv'
-})
+const attachmentAccept = 'image/jpeg,image/png,image/webp,.txt,.md,.markdown,.pdf,.doc,.docx,.xls,.xlsx,.xlsm,.csv'
 const selectedFiles = ref<UploadUserFile[]>([])
 const selectedImportFile = ref<File | null>(null)
 const selectedModelFiles = ref<File[]>([])
@@ -448,6 +426,9 @@ const importSha = ref('')
 const importProjectorSha = ref('')
 const importDetectedCapabilities = ref<string[]>([])
 const importFailureDetail = ref('')
+const importDiagnostic = ref<{ path: string; downloadUrl?: string } | null>(null)
+const importDiagnosticError = ref('')
+const importDiagnosticSaving = ref(false)
 const importRuntimePending = ref(false)
 const ollamaConnected = ref(false)
 const ollamaConnectionState = ref<OllamaConnectionState>('checking')
@@ -861,7 +842,6 @@ function inferImageConversationIntent(
 }
 
 const composerImageIntent = computed(() => {
-  if (activeComposerSkill.value) return 'chat'
   if (composerMode.value === 'image') {
     return pendingImages.value.length ? 'edit' : 'generate'
   }
@@ -1285,6 +1265,9 @@ function getErrorMessage(error: unknown) {
 }
 
 async function saveModelImportFailureLog(stage: string, error: unknown) {
+  importDiagnostic.value = null
+  importDiagnosticError.value = ''
+  importDiagnosticSaving.value = true
   const files =
     importMode.value === 'image'
       ? selectedImageImportFiles.value
@@ -1300,15 +1283,27 @@ async function saveModelImportFailureLog(stage: string, error: unknown) {
       files: files.map((file) => ({ name: file.name, size: file.size })),
     })
     if (result.saved) {
+      importDiagnostic.value = result
       ElMessage.info({
-        message: `失败原因已保存到桌面：${result.path}`,
+        message: `诊断文件已保存：${result.path}`,
         duration: 8_000,
         showClose: true,
       })
     }
-  } catch {
-    // Never hide the original import error when diagnostic logging is unavailable.
+  } catch (logError) {
+    importDiagnosticError.value = getErrorMessage(logError)
+    ElMessage.warning(`诊断文件保存失败：${getErrorMessage(logError)}；原始导入错误仍保留在页面。`)
+  } finally {
+    importDiagnosticSaving.value = false
   }
+}
+
+async function openImportLogDirectory() {
+  try {
+    const response = await fetch('/shotai/open-log-directory', { method: 'POST', credentials: 'same-origin' })
+    const body = await response.json()
+    if (!response.ok) throw new Error(body.error || '无法打开日志目录')
+  } catch (error) { ElMessage.error(getErrorMessage(error)) }
 }
 
 function getModelContextTokens(show?: OllamaShowResponse) {
@@ -1399,7 +1394,6 @@ async function restoreWorkspace() {
         : restored[0]?.id ?? 'c-default'
       darkMode.value = saved.darkMode !== false
       showReasoning.value = saved.showReasoning === true
-      desktopPetEnabled.value = saved.desktopPetEnabled === true
       messageId = Math.max(
         messageId,
         ...conversations.value.flatMap((conversation) =>
@@ -1424,7 +1418,6 @@ async function persistWorkspace() {
     activeConversation: activeConversation.value,
     darkMode: darkMode.value,
     showReasoning: showReasoning.value,
-    desktopPetEnabled: desktopPetEnabled.value,
     conversations: conversations.value,
   }
 
@@ -1760,61 +1753,6 @@ function nowTime() {
   }).format(new Date())
 }
 
-const focusSessionLabel = computed(() => {
-  const minutes = Math.floor(focusSessionRemaining.value / 60)
-  const seconds = focusSessionRemaining.value % 60
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-})
-
-function pauseFocusSession() {
-  focusSessionRunning.value = false
-  if (focusSessionTimer) window.clearInterval(focusSessionTimer)
-  focusSessionTimer = undefined
-}
-
-function toggleFocusSession() {
-  if (focusSessionRunning.value) {
-    pauseFocusSession()
-    desktopPetMessage.value = '休息一下也很好，我会等你回来'
-    return
-  }
-  focusSessionRunning.value = true
-  desktopPetMessage.value = '专心工作吧，我会安静陪着你'
-  focusSessionTimer = window.setInterval(() => {
-    focusSessionRemaining.value = Math.max(0, focusSessionRemaining.value - 1)
-    if (focusSessionRemaining.value === 0) {
-      pauseFocusSession()
-      desktopPetMessage.value = '完成一轮专注啦，起来活动一下吧'
-      desktopPetPanelOpen.value = true
-    }
-  }, 1_000)
-}
-
-function resetFocusSession() {
-  pauseFocusSession()
-  focusSessionRemaining.value = 25 * 60
-  desktopPetMessage.value = '计时器准备好了，随时可以开始'
-}
-
-function reactToDesktopPet() {
-  const messages = [
-    '喵，我在这里陪你',
-    '摸摸收到，继续加油',
-    '记得喝水，也记得保存工作',
-    focusSessionRunning.value ? `还剩 ${focusSessionLabel.value}，一起坚持` : '要开始一轮专注吗',
-  ]
-  desktopPetMessage.value = messages[Math.floor(Math.random() * messages.length)]
-  desktopPetPanelOpen.value = true
-  desktopPetReacting.value = false
-  void nextTick(() => {
-    desktopPetReacting.value = true
-    if (desktopPetReactionTimer) window.clearTimeout(desktopPetReactionTimer)
-    desktopPetReactionTimer = window.setTimeout(() => {
-      desktopPetReacting.value = false
-    }, 360)
-  })
-}
-
 function toggleConversationSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value
 }
@@ -1838,6 +1776,7 @@ function monitorInferenceStateLabel(snapshot: MonitorSnapshot) {
   if (snapshot.performance.modelOperation.active) return '正在导入模型'
   const inference = snapshot.performance.inference
   if (inference.state === 'running' && inference.backend === 'gpu') return 'GPU 推理'
+  if (inference.state === 'running' && inference.backend === 'mixed') return 'CPU / GPU 混合'
   if (inference.state === 'running' && inference.backend === 'cpu') return 'CPU 推理'
   if (inference.state === 'unavailable') return 'AI 服务未连接'
   return '等待模型调用'
@@ -2103,7 +2042,7 @@ async function deleteConversation(conversationId = activeConversation.value) {
   }
   await Promise.allSettled(
     conversation.messages.flatMap((message) =>
-      (message.artifacts || []).map((artifact) =>
+      [...(message.artifacts || []), ...(message.attachments || [])].map((artifact) =>
         deleteLocalArtifact(artifact.id),
       ),
     ),
@@ -2151,7 +2090,7 @@ async function clearCurrentConversation() {
   pendingAttachments.value = []
   await Promise.allSettled(
     conversation.messages.flatMap((message) =>
-      (message.artifacts || []).map((artifact) =>
+      [...(message.artifacts || []), ...(message.attachments || [])].map((artifact) =>
         deleteLocalArtifact(artifact.id),
       ),
     ),
@@ -2520,7 +2459,7 @@ async function prepareMessageAttachment(file: File): Promise<MessageAttachment> 
     ? `${extractedText.slice(0, MAX_ATTACHMENT_TEXT_CHARS - 2_000)}\n\n[内容过长，中间部分已省略]\n\n${extractedText.slice(-1_900)}`
     : extractedText
 
-  return {
+  const attachment: MessageAttachment = {
     id: `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name: file.name,
     mimeType: file.type || 'application/octet-stream',
@@ -2530,42 +2469,14 @@ async function prepareMessageAttachment(file: File): Promise<MessageAttachment> 
     characterCount: extractedText.length,
     truncated,
   }
+  await saveLocalArtifact({
+    id: attachment.id, name: file.name, mimeType: attachment.mimeType,
+    size: file.size, createdAt: Date.now(), blob: file, text: attachment.content,
+    truncated: attachment.truncated,
+  })
+  return attachment
 }
 
-function isExcelSkillFile(file: File) {
-  return /\.(?:xlsx?|csv)$/i.test(file.name)
-}
-
-function prepareExcelSkillAttachment(file: File): MessageAttachment {
-  validateExcelSkillSourceFile(file)
-  return {
-    id: `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: file.name,
-    mimeType: file.type || 'application/octet-stream',
-    extension: getFileExtension(file.name).toUpperCase() || 'XLSX',
-    size: file.size,
-    content: '此文件将由 Excel Skill 在本地读取并按要求修改。',
-    characterCount: 0,
-    truncated: false,
-  }
-}
-
-function prepareDocumentSkillAttachment(
-  file: File,
-  kind: DocumentSkillKind,
-): MessageAttachment {
-  validateDocumentSkillSourceFile(file, kind)
-  return {
-    id: `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    name: file.name,
-    mimeType: file.type || 'application/octet-stream',
-    extension: getFileExtension(file.name).toUpperCase(),
-    size: file.size,
-    content: `此文件将由 ${kind === 'word' ? 'Word' : 'PDF'} Skill 在本地读取并按要求处理。`,
-    characterCount: 0,
-    truncated: false,
-  }
-}
 
 function pendingFileCount() {
   return pendingImages.value.length + pendingAttachments.value.length
@@ -2573,53 +2484,6 @@ function pendingFileCount() {
 
 async function addMessageFiles(files: File[]) {
   if (attachmentProcessing.value) return
-  if (
-    activeComposerSkill.value === 'word' ||
-    activeComposerSkill.value === 'pdf'
-  ) {
-    const kind = activeComposerSkill.value
-    const extension = kind === 'word' ? '.docx' : '.pdf'
-    const sourceFile = files.find((file) => file.name.toLowerCase().endsWith(extension))
-    if (!sourceFile) {
-      ElMessage.warning(`${kind === 'word' ? 'Word' : 'PDF'} Skill 请选择 ${extension} 文件`)
-      return
-    }
-    attachmentProcessing.value = true
-    try {
-      const attachment = prepareDocumentSkillAttachment(sourceFile, kind)
-      documentSkillSourceFiles.clear()
-      documentSkillSourceFiles.set(attachment.id, sourceFile)
-      pendingImages.value = []
-      pendingAttachments.value = [attachment]
-      ElMessage.success(`${kind === 'word' ? 'Word' : 'PDF'} 已添加，请描述需要修改的内容`)
-    } catch (error) {
-      ElMessage.error(getErrorMessage(error))
-    } finally {
-      attachmentProcessing.value = false
-    }
-    return
-  }
-  if (activeComposerSkill.value === 'excel') {
-    const excelFile = files.find(isExcelSkillFile)
-    if (!excelFile) {
-      ElMessage.warning('Excel Skill 请选择 .xlsx、.xls 或 .csv 文件')
-      return
-    }
-    attachmentProcessing.value = true
-    try {
-      const attachment = prepareExcelSkillAttachment(excelFile)
-      excelSkillSourceFiles.clear()
-      excelSkillSourceFiles.set(attachment.id, excelFile)
-      pendingImages.value = []
-      pendingAttachments.value = [attachment]
-      ElMessage.success('Excel 已添加，请描述需要修改的内容')
-    } catch (error) {
-      ElMessage.error(getErrorMessage(error))
-    } finally {
-      attachmentProcessing.value = false
-    }
-    return
-  }
   if (composerMode.value === 'image') {
     if (!selectLocalImageEditProvider()) {
       ElMessage.warning('这台主机还没有准备可以修改图片的本地组件')
@@ -2693,51 +2557,6 @@ function openAttachmentPicker() {
   attachmentInputRef.value?.click()
 }
 
-function activateExcelSkill() {
-  if (isGenerating.value) return
-  if (pendingImages.value.length || pendingAttachments.value.length) {
-    ElMessage.warning('请先移除当前附件，再启用 Excel Skill')
-    return
-  }
-  composerMode.value = 'chat'
-  activeComposerSkill.value = 'excel'
-  void nextTick(focusSenderEnd)
-}
-
-function activateDocumentSkill(kind: DocumentSkillKind) {
-  if (isGenerating.value) return
-  if (pendingImages.value.length || pendingAttachments.value.length) {
-    ElMessage.warning('请先移除当前附件，再启用文档 Skill')
-    return
-  }
-  composerMode.value = 'chat'
-  activeComposerSkill.value = kind
-  void nextTick(focusSenderEnd)
-}
-
-function leaveExcelSkill() {
-  if (isGenerating.value) return
-  for (const attachment of pendingAttachments.value) {
-    excelSkillSourceFiles.delete(attachment.id)
-  }
-  pendingAttachments.value = []
-  activeComposerSkill.value = null
-  void nextTick(focusSenderEnd)
-}
-
-function leaveActiveSkill() {
-  if (activeComposerSkill.value === 'excel') {
-    leaveExcelSkill()
-    return
-  }
-  if (isGenerating.value) return
-  for (const attachment of pendingAttachments.value) {
-    documentSkillSourceFiles.delete(attachment.id)
-  }
-  pendingAttachments.value = []
-  activeComposerSkill.value = null
-  void nextTick(focusSenderEnd)
-}
 
 async function refreshImageRuntime(options: { announce?: boolean } = {}) {
   if (imageRuntimeChecking.value) return
@@ -3090,7 +2909,6 @@ function useImageComposer() {
     return
   }
   composerMode.value = 'image'
-  activeComposerSkill.value = null
   imageStudioOpen.value = false
   void nextTick(() => {
     resizeComposer()
@@ -3376,18 +3194,6 @@ function handleComposerResourceAction(command: string | number | object) {
     useImageComposer()
     return
   }
-  if (command === 'excel-skill') {
-    activateExcelSkill()
-    return
-  }
-  if (command === 'word-skill') {
-    activateDocumentSkill('word')
-    return
-  }
-  if (command === 'pdf-skill') {
-    activateDocumentSkill('pdf')
-    return
-  }
   if (command === 'models') {
     modelDrawerOpen.value = true
   }
@@ -3416,8 +3222,6 @@ function removePendingImage(imageId: string) {
 }
 
 function removePendingAttachment(attachmentId: string) {
-  excelSkillSourceFiles.delete(attachmentId)
-  documentSkillSourceFiles.delete(attachmentId)
   pendingAttachments.value = pendingAttachments.value.filter(
     (attachment) => attachment.id !== attachmentId,
   )
@@ -3426,7 +3230,7 @@ function removePendingAttachment(attachmentId: string) {
 async function downloadMessageArtifact(artifact: MessageArtifact) {
   try {
     const record = await loadLocalArtifact(artifact.id)
-    if (!record?.blob) throw new Error('本地文件已不存在，请重新执行这次 Excel 任务')
+    if (!record?.blob) throw new Error('本地文件已不存在，请重新发送生成或修改文件的要求')
     const url = URL.createObjectURL(record.blob)
     const link = document.createElement('a')
     link.href = url
@@ -3839,8 +3643,7 @@ function stopGeneration() {
     imageStatus.value = '正在停止'
     const last = messages.value[messages.value.length - 1]
     if (last?.role === 'assistant') {
-      last.stopped = true
-      last.generationStatus = '正在停止'
+      last.generationStatus = '取消中'
     }
     imageController.abort()
     return
@@ -3849,11 +3652,7 @@ function stopGeneration() {
   isStopping.value = true
   chatController?.abort()
   const last = messages.value[messages.value.length - 1]
-  if (last?.role === 'assistant') last.stopped = true
-  if (last?.role === 'assistant' && !last.content) {
-    last.content = '已停止生成。'
-  }
-  if (last) last.loading = false
+  if (last?.role === 'assistant') last.generationStatus = '取消中'
   if (activeConversationRecord.value) {
     activeConversationRecord.value.updatedAt = Date.now()
   }
@@ -3915,133 +3714,139 @@ async function generateAssistantResponse() {
   conversation.updatedAt = Date.now()
   isGenerating.value = true
   isStopping.value = false
-  await nextTick()
-  scrollMessagesToBottom(true)
-
-  const ragResults = await retrieveConversationKnowledge(conversation)
-  if (ragResults.length) {
-    assistantMessage.sources = ragResults.map((result) => ({
-      id: result.chunk.id,
-      documentName: result.chunk.documentName,
-      chunkIndex: result.chunk.index,
-      score: result.score,
-      mode: result.mode,
-      excerpt: result.chunk.content.slice(0, 220),
-    }))
-  }
-  assistantMessage.reasoning = shouldShowReasoning
-    ? thinkingPlaceholder
-    : ragResults.length
-      ? `已找到 ${ragResults.length} 段相关资料。`
-      : undefined
-
-  const chatMessages = conversation.messages.filter(
-    (message) => message.id !== assistantMessage.id && message.content,
-  )
-  const visionImages = supportsVision ? visionSourceMessage?.images ?? [] : []
-  const effectiveContextLength = getEffectiveContextLength(
-    model,
-    conversation.settings.contextLength,
-    visionImages.length,
-  )
-  let attachmentCharacterBudget = Math.max(
-    3_000,
-    Math.min(18_000, Math.floor(effectiveContextLength * 1.25)),
-  )
-  const preparedMessages = chatMessages.map((message) => {
-    const attachmentContent = createOllamaMessageContent(
-      message,
-      attachmentCharacterBudget,
-    )
-    attachmentCharacterBudget = Math.max(
-      0,
-      attachmentCharacterBudget - attachmentContent.usedAttachmentCharacters,
-    )
-    const images =
-      supportsVision &&
-      message.role === 'user' &&
-      message.id === visionSourceMessage?.id
-        ? message.images
-        : undefined
-    return {
-      id: message.id,
-      role: message.role,
-      content: attachmentContent.content,
-      images,
-      ...(shouldShowReasoning && message.reasoning
-        ? { thinking: message.reasoning }
-        : {}),
-    }
-  })
-  const systemMessages: OllamaChatMessage[] = []
-  if (conversation.systemPrompt.trim()) {
-    systemMessages.push({
-      role: 'system',
-      content: conversation.systemPrompt.trim(),
-    })
-  }
-  const ragSystemMessage = createRagSystemMessage(ragResults)
-  if (ragSystemMessage) {
-    systemMessages.push({
-      role: 'system',
-      content: ragSystemMessage,
-    })
-  }
-  const reservedOutputTokens = Math.min(
-    1_024,
-    Math.max(512, Math.floor(effectiveContextLength * 0.2)),
-  )
-  const promptTokenBudget = Math.max(
-    1_024,
-    effectiveContextLength - reservedOutputTokens - 256,
-  )
-  let usedPromptTokens = systemMessages.reduce(
-    (total, message) => total + estimateTextTokens(message.content),
-    0,
-  )
-  const selectedPreparedMessages: typeof preparedMessages = []
-  const latestPreparedMessage = preparedMessages.at(-1)
-  for (const message of [...preparedMessages].reverse()) {
-    const messageTokens =
-      estimateTextTokens(message.content) + estimateImageTokens(message.images)
-    const required =
-      message.id === latestPreparedMessage?.id ||
-      message.id === visionSourceMessage?.id
-    if (required || usedPromptTokens + messageTokens <= promptTokenBudget) {
-      selectedPreparedMessages.unshift(message)
-      usedPromptTokens += messageTokens
-    }
-  }
-  const history: OllamaChatMessage[] = [
-    ...systemMessages,
-    ...selectedPreparedMessages.map((message) => ({
-      role: message.role,
-      content: message.content,
-      ...(message.images?.length
-        ? {
-            images: message.images.map((image) =>
-              toOllamaImage(image.dataUrl),
-            ),
-          }
-        : {}),
-      ...(message.thinking ? { thinking: message.thinking } : {}),
-    })),
-  ]
-  const generation: OllamaGenerationOptions = {
-    temperature: conversation.settings.temperature,
-    top_p: conversation.settings.topP,
-    num_ctx: effectiveContextLength,
-    num_predict: conversation.settings.maxOutput,
-  }
-
   const controller = new AbortController()
   chatController = controller
+  assistantMessage.generationStatus = '正在准备请求'
   try {
+    await nextTick()
+    scrollMessagesToBottom(true)
+
+    const ragResults = await retrieveConversationKnowledge(conversation)
+    if (ragResults.length) {
+      assistantMessage.sources = ragResults.map((result) => ({
+        id: result.chunk.id,
+        documentName: result.chunk.documentName,
+        chunkIndex: result.chunk.index,
+        score: result.score,
+        mode: result.mode,
+        excerpt: result.chunk.content.slice(0, 220),
+      }))
+    }
+    assistantMessage.reasoning = shouldShowReasoning
+      ? thinkingPlaceholder
+      : ragResults.length
+        ? `已找到 ${ragResults.length} 段相关资料。`
+        : undefined
+
+    const chatMessages = conversation.messages.filter(
+      (message) => message.id !== assistantMessage.id && message.content,
+    )
+    const visionImages = supportsVision ? visionSourceMessage?.images ?? [] : []
+    const effectiveContextLength = getEffectiveContextLength(
+      model,
+      conversation.settings.contextLength,
+      visionImages.length,
+    )
+    let attachmentCharacterBudget = Math.max(
+      3_000,
+      Math.min(18_000, Math.floor(effectiveContextLength * 1.25)),
+    )
+    const preparedMessages = chatMessages.map((message) => {
+      const attachmentContent = createOllamaMessageContent(
+        message,
+        attachmentCharacterBudget,
+      )
+      attachmentCharacterBudget = Math.max(
+        0,
+        attachmentCharacterBudget - attachmentContent.usedAttachmentCharacters,
+      )
+      const images =
+        supportsVision &&
+        message.role === 'user' &&
+        message.id === visionSourceMessage?.id
+          ? message.images
+          : undefined
+      return {
+        id: message.id,
+        role: message.role,
+        content: attachmentContent.content,
+        images,
+        ...(shouldShowReasoning && message.reasoning
+          ? { thinking: message.reasoning }
+          : {}),
+      }
+    })
+    const systemMessages: OllamaChatMessage[] = []
+    if (conversation.systemPrompt.trim()) {
+      systemMessages.push({
+        role: 'system',
+        content: conversation.systemPrompt.trim(),
+      })
+    }
+    const ragSystemMessage = createRagSystemMessage(ragResults)
+    if (ragSystemMessage) {
+      systemMessages.push({
+        role: 'system',
+        content: ragSystemMessage,
+      })
+    }
+    const reservedOutputTokens = Math.min(
+      1_024,
+      Math.max(512, Math.floor(effectiveContextLength * 0.2)),
+    )
+    const promptTokenBudget = Math.max(
+      1_024,
+      effectiveContextLength - reservedOutputTokens - 256,
+    )
+    let usedPromptTokens = systemMessages.reduce(
+      (total, message) => total + estimateTextTokens(message.content),
+      0,
+    )
+    const selectedPreparedMessages: typeof preparedMessages = []
+    const latestPreparedMessage = preparedMessages.at(-1)
+    for (const message of [...preparedMessages].reverse()) {
+      const messageTokens =
+        estimateTextTokens(message.content) + estimateImageTokens(message.images)
+      const required =
+        message.id === latestPreparedMessage?.id ||
+        message.id === visionSourceMessage?.id
+      if (required || usedPromptTokens + messageTokens <= promptTokenBudget) {
+        selectedPreparedMessages.unshift(message)
+        usedPromptTokens += messageTokens
+      }
+    }
+    const history: OllamaChatMessage[] = [
+      ...systemMessages,
+      ...selectedPreparedMessages.map((message) => ({
+        role: message.role,
+        content: message.content,
+        ...(message.images?.length
+          ? {
+              images: message.images.map((image) =>
+                toOllamaImage(image.dataUrl),
+              ),
+            }
+          : {}),
+        ...(message.thinking ? { thinking: message.thinking } : {}),
+      })),
+    ]
+    const generation: OllamaGenerationOptions = {
+      temperature: conversation.settings.temperature,
+      top_p: conversation.settings.topP,
+      num_ctx: effectiveContextLength,
+      num_predict: conversation.settings.maxOutput,
+    }
+
+    if (await respondWithOfficeFile(conversation, assistantMessage, controller, ragResults)) return
+    controller.signal.throwIfAborted()
+    assistantMessage.generationStatus = '等待模型响应（可能排队或加载）'
     await chatWithOllama(modelId, history, {
       signal: controller.signal,
       think: supportsThinking ? showReasoning.value : undefined,
       generation,
       onThinking(chunk) {
+        if (controller.signal.aborted) return
+        assistantMessage.generationStatus = '正在思考'
         assistantMessage.reasoning =
           assistantMessage.reasoning === thinkingPlaceholder
             ? chunk
@@ -4049,6 +3854,8 @@ async function generateAssistantResponse() {
         assistantMessage.loading = true
       },
       onContent(chunk) {
+        if (controller.signal.aborted) return
+        assistantMessage.generationStatus = '正在生成'
         const shouldFollow = isMessageScrollerNearBottom()
         assistantMessage.content += chunk
         assistantMessage.loading = false
@@ -4067,7 +3874,11 @@ async function generateAssistantResponse() {
     })
     if (!assistantMessage.content) assistantMessage.content = '模型未返回文本内容。'
   } catch (error) {
-    if (!(error instanceof DOMException && error.name === 'AbortError')) {
+    if (controller.signal.aborted) {
+      assistantMessage.stopped = true
+      assistantMessage.generationStatus = '已停止（本次请求）'
+      if (!assistantMessage.content) assistantMessage.content = '已停止生成。'
+    } else {
       if (
         error instanceof OllamaApiError &&
         (error.status === 403 || error.status === 404)
@@ -4079,9 +3890,16 @@ async function generateAssistantResponse() {
       }
       assistantMessage.loading = false
       assistantMessage.content = `生成失败：${getErrorMessage(error)}`
+      assistantMessage.generationStatus = '生成失败'
       ElMessage.error(getErrorMessage(error))
     }
   } finally {
+    if (controller.signal.aborted) {
+      assistantMessage.stopped = true
+      assistantMessage.generationStatus = '已停止（本次请求）'
+      if (!assistantMessage.content) assistantMessage.content = '已停止生成。'
+    }
+    if (!assistantMessage.stopped && assistantMessage.generationStatus !== '生成失败') assistantMessage.generationStatus = undefined
     assistantMessage.loading = false
     conversation.updatedAt = Date.now()
     if (chatController === controller) {
@@ -4093,280 +3911,119 @@ async function generateAssistantResponse() {
   }
 }
 
-async function runExcelSkill() {
-  if (isGenerating.value || !ensureChatReady()) return
-  const instruction = senderText.value.trim()
-  if (!instruction) {
-    ElMessage.warning('请描述要生成的表格，或要修改的 Excel 数据')
-    return
-  }
-  const conversation = activeConversationRecord.value
-  if (!conversation) return
-  const sourceAttachment = pendingAttachments.value.find((attachment) =>
-    excelSkillSourceFiles.has(attachment.id),
+async function respondWithOfficeFile(
+  conversation: ConversationRecord,
+  assistantMessage: DemoMessage,
+  controller: AbortController,
+  ragResults: RetrievedKnowledge[],
+) {
+  const history = conversation.messages.filter((message) =>
+    message.id !== assistantMessage.id && message.content,
   )
-  const sourceFile = sourceAttachment
-    ? excelSkillSourceFiles.get(sourceAttachment.id)
+  const latestUser = [...history].reverse().find((message) => message.role === 'user')
+  if (!latestUser || latestUser.images?.length) return false
+  const sources: OfficeSource[] = []
+  const records = new Map<string, Awaited<ReturnType<typeof loadLocalArtifact>>>()
+  for (const message of [...history].reverse()) {
+    for (const attachment of [...(message.attachments ?? []), ...(message.artifacts ?? [])]) {
+      if (sources.some((source) => source.id === attachment.id) || sources.length >= 16) continue
+      const record = await loadLocalArtifact(attachment.id)
+      records.set(attachment.id, record)
+      sources.push({
+        id: attachment.id, name: attachment.name,
+        content: 'content' in attachment ? attachment.content : record?.text ?? message.content,
+        truncated: 'truncated' in attachment ? attachment.truncated : record?.truncated,
+        available: Boolean(record),
+      })
+    }
+  }
+  controller.signal.throwIfAborted()
+  assistantMessage.generationStatus = '正在理解请求'
+  let routeText = ''
+  const routeContext = Math.min(getEffectiveContextLength(selectedModel.value, conversation.settings.contextLength, 0), 16_384)
+  await chatWithOllama(currentModelId.value, createOfficeRouteMessages(
+    history.map((message) => ({ role: message.role, content: message.content })), sources,
+    Math.max(800, Math.floor((routeContext - 2_048) / 2)),
+  ), {
+    signal: controller.signal, think: false, format: 'json',
+    generation: { temperature: 0, top_p: 0.2, num_ctx: routeContext, num_predict: 512 },
+    onContent(chunk) { routeText += chunk },
+  })
+  const route = parseOfficeRoute(routeText, sources)
+  assistantMessage.generationStatus = undefined
+  if (route.action === 'chat') return false
+  assistantMessage.reasoning = undefined
+  if (route.action === 'clarify') {
+    assistantMessage.content = route.question
+    return true
+  }
+  const source = route.sourceId ? sources.find((item) => item.id === route.sourceId) : undefined
+  const record = route.sourceId ? records.get(route.sourceId) : undefined
+  const file = record ? new File([record.blob], record.name, { type: record.mimeType }) : undefined
+  const context = createOfficeContext(source ? [source, ...sources.filter((item) => item.id !== source.id)] : sources)
+  const instruction = [
+    '以下是对话上下文，仅用于理解用户要求和引用已提供的信息：',
+    ...history.slice(-8).map((message) => `${message.role === 'user' ? '用户' : '助手'}：${message.content.slice(-3_000)}`),
+    context,
+    createRagSystemMessage(ragResults),
+    `本次用户要求：${latestUser.content}`,
+  ].filter(Boolean).join('\n\n')
+  assistantMessage.generationStatus = route.action === 'edit' ? '正在修改文件' : '正在生成文件'
+  const preview = route.action === 'edit' && file
+    ? route.kind === 'excel'
+      ? await previewExcelWorkbook(file)
+      : /\.(docx|pdf)$/i.test(file.name) && file.name.toLowerCase().endsWith(route.kind === 'word' ? '.docx' : '.pdf')
+        ? await previewDocumentSkillFile(file, route.kind)
+        : { fileName: file.name, text: source?.content ?? '', truncated: source?.truncated ?? false }
     : undefined
-  if (pendingAttachments.value.length && !sourceFile) {
-    ElMessage.warning('Excel 原文件需要重新上传后才能修改')
-    return
+  if (route.action === 'edit' && route.kind !== 'excel' && preview?.truncated) {
+    throw new Error('原文超出当前文档修改范围，请拆分文件或指定需要处理的章节，避免遗漏原文')
   }
-
-  const submittedAttachments = sourceAttachment ? [{ ...sourceAttachment }] : []
-  const isFirstUserMessage = conversation.messages.every(
-    (message) => message.role !== 'user',
-  )
-  conversation.messages.push({
-    id: ++messageId,
-    role: 'user',
-    placement: 'end',
-    variant: 'filled',
-    content: instruction,
-    attachments: submittedAttachments.length ? submittedAttachments : undefined,
-    time: nowTime(),
-    skillId: 'excel',
+  const prompt = route.kind === 'excel'
+    ? createExcelSkillMessages(instruction, preview)
+    : createDocumentSkillMessages(route.kind, instruction, preview)
+  let planText = ''
+  await chatWithOllama(currentModelId.value, [
+    { role: 'system', content: prompt.system },
+    { role: 'user', content: prompt.user },
+  ], {
+    signal: controller.signal, think: false, format: 'json',
+    generation: {
+      temperature: 0.1, top_p: 0.2,
+      num_ctx: Math.min(Math.max(selectedModel.value.contextTokens || 8_192, 4_096), 32_768),
+      num_predict: 6_144,
+    },
+    onContent(chunk) { planText += chunk },
   })
-  if (isFirstUserMessage && conversation.label === '新的离线对话') {
-    conversation.label = `Excel：${instruction}`.replace(/\s+/g, ' ').slice(0, 28)
+  controller.signal.throwIfAborted()
+  const result = route.kind === 'excel'
+    ? await executeExcelSkillPlan(parseExcelSkillPlan(planText, route.action), route.action === 'edit' ? file : undefined)
+    : await executeDocumentSkillPlan(route.kind, parseDocumentSkillPlan(planText, route.action))
+  controller.signal.throwIfAborted()
+  const artifact: MessageArtifact = {
+    id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: result.fileName, mimeType: result.mimeType, size: result.blob.size, kind: route.kind,
   }
-
-  const assistantMessage = reactive<DemoMessage>({
-    id: ++messageId,
-    role: 'assistant',
-    placement: 'start',
-    variant: 'borderless',
-    content: '',
-    reasoning: sourceFile ? '正在读取工作簿并规划修改。' : '正在规划工作簿结构。',
-    time: nowTime(),
-    loading: true,
-    modelId: selectedModel.value.id,
-    modelName: `${selectedModel.value.name} · Excel Skill`,
-    generationType: 'chat',
-    skillId: 'excel',
-  })
-  conversation.messages.push(assistantMessage)
-  conversation.updatedAt = Date.now()
-  senderText.value = ''
-  pendingAttachments.value = []
-  if (sourceAttachment) excelSkillSourceFiles.delete(sourceAttachment.id)
-  isGenerating.value = true
-  isStopping.value = false
-  void nextTick(() => {
-    resizeComposer()
-    scrollMessagesToBottom(true)
-  })
-
-  const controller = new AbortController()
-  chatController = controller
-  try {
-    const preview = sourceFile ? await previewExcelWorkbook(sourceFile) : undefined
-    const prompt = createExcelSkillMessages(instruction, preview)
-    let planText = ''
-    await chatWithOllama(
-      currentModelId.value,
-      [
-        { role: 'system', content: prompt.system },
-        { role: 'user', content: prompt.user },
-      ],
-      {
-        signal: controller.signal,
-        think: false,
-        generation: {
-          temperature: 0.1,
-          top_p: 0.2,
-          num_ctx: Math.min(
-            Math.max(selectedModel.value.contextTokens || 8_192, 4_096),
-            16_384,
-          ),
-          num_predict: 4_096,
-        },
-        onContent(chunk) {
-          planText += chunk
-        },
-      },
-    )
-    const plan = parseExcelSkillPlan(planText, sourceFile ? 'edit' : 'create')
-    const result = await executeExcelSkillPlan(plan, sourceFile)
-    const artifact: MessageArtifact = {
-      id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: result.fileName,
-      mimeType: result.mimeType,
-      size: result.blob.size,
-      kind: 'excel',
-    }
-    await saveLocalArtifact({
-      ...artifact,
-      createdAt: Date.now(),
-      blob: result.blob,
-    })
-    assistantMessage.artifacts = [artifact]
-    assistantMessage.reasoning = undefined
-    assistantMessage.content = `${result.summary}\n\nExcel 文件已在本机生成，点击文件卡片即可下载。`
-  } catch (error) {
-    assistantMessage.reasoning = undefined
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      assistantMessage.stopped = true
-      assistantMessage.content = '已停止 Excel 任务。'
-    } else {
-      assistantMessage.content = `Excel 处理失败：${getErrorMessage(error)}`
-      ElMessage.error(getErrorMessage(error))
-    }
-  } finally {
-    assistantMessage.loading = false
-    conversation.updatedAt = Date.now()
-    if (chatController === controller) chatController = undefined
-    isGenerating.value = false
-    isStopping.value = false
-    scheduleWorkspaceSave()
+  const outputPreview = route.kind === 'excel'
+    ? await previewExcelWorkbook(new File([result.blob], result.fileName, { type: result.mimeType }))
+    : { text: parseDocumentSkillPlan(planText, route.action).blocks.map((block) => block.text).join('\n\n'), truncated: false }
+  controller.signal.throwIfAborted()
+  await saveLocalArtifact({ ...artifact, createdAt: Date.now(), blob: result.blob,
+    text: outputPreview.text, truncated: outputPreview.truncated })
+  if (controller.signal.aborted) {
+    await deleteLocalArtifact(artifact.id)
+    controller.signal.throwIfAborted()
   }
-}
-
-async function runDocumentSkill(kind: DocumentSkillKind) {
-  if (isGenerating.value || !ensureChatReady()) return
-  const instruction = senderText.value.trim()
-  const label = kind === 'word' ? 'Word' : 'PDF'
-  if (!instruction) {
-    ElMessage.warning(`请描述要生成或修改的 ${label} 内容`)
-    return
-  }
-  const conversation = activeConversationRecord.value
-  if (!conversation) return
-  const sourceAttachment = pendingAttachments.value.find((attachment) =>
-    documentSkillSourceFiles.has(attachment.id),
-  )
-  const sourceFile = sourceAttachment
-    ? documentSkillSourceFiles.get(sourceAttachment.id)
-    : undefined
-  if (pendingAttachments.value.length && !sourceFile) {
-    ElMessage.warning(`${label} 原文件需要重新上传后才能修改`)
-    return
-  }
-  const submittedAttachments = sourceAttachment ? [{ ...sourceAttachment }] : []
-  const isFirstUserMessage = conversation.messages.every(
-    (message) => message.role !== 'user',
-  )
-  conversation.messages.push({
-    id: ++messageId,
-    role: 'user',
-    placement: 'end',
-    variant: 'filled',
-    content: instruction,
-    attachments: submittedAttachments.length ? submittedAttachments : undefined,
-    time: nowTime(),
-    skillId: kind,
-  })
-  if (isFirstUserMessage && conversation.label === '新的离线对话') {
-    conversation.label = `${label}：${instruction}`.replace(/\s+/g, ' ').slice(0, 28)
-  }
-  const assistantMessage = reactive<DemoMessage>({
-    id: ++messageId,
-    role: 'assistant',
-    placement: 'start',
-    variant: 'borderless',
-    content: '',
-    reasoning: sourceFile ? `正在读取并修改 ${label} 文件。` : `正在规划 ${label} 文档。`,
-    time: nowTime(),
-    loading: true,
-    modelId: selectedModel.value.id,
-    modelName: `${selectedModel.value.name} · ${label} Skill`,
-    generationType: 'chat',
-    skillId: kind,
-  })
-  conversation.messages.push(assistantMessage)
-  conversation.updatedAt = Date.now()
-  senderText.value = ''
-  pendingAttachments.value = []
-  if (sourceAttachment) documentSkillSourceFiles.delete(sourceAttachment.id)
-  isGenerating.value = true
-  isStopping.value = false
-  void nextTick(() => {
-    resizeComposer()
-    scrollMessagesToBottom(true)
-  })
-
-  const controller = new AbortController()
-  chatController = controller
-  try {
-    const preview = sourceFile
-      ? await previewDocumentSkillFile(sourceFile, kind)
-      : undefined
-    const prompt = createDocumentSkillMessages(kind, instruction, preview)
-    let planText = ''
-    await chatWithOllama(
-      currentModelId.value,
-      [
-        { role: 'system', content: prompt.system },
-        { role: 'user', content: prompt.user },
-      ],
-      {
-        signal: controller.signal,
-        think: false,
-        generation: {
-          temperature: 0.2,
-          top_p: 0.3,
-          num_ctx: Math.min(
-            Math.max(selectedModel.value.contextTokens || 8_192, 4_096),
-            32_768,
-          ),
-          num_predict: 6_144,
-        },
-        onContent(chunk) {
-          planText += chunk
-        },
-      },
-    )
-    const plan = parseDocumentSkillPlan(planText, sourceFile ? 'edit' : 'create')
-    const result = await executeDocumentSkillPlan(kind, plan)
-    const artifact: MessageArtifact = {
-      id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: result.fileName,
-      mimeType: result.mimeType,
-      size: result.blob.size,
-      kind,
-    }
-    await saveLocalArtifact({
-      ...artifact,
-      createdAt: Date.now(),
-      blob: result.blob,
-    })
-    assistantMessage.artifacts = [artifact]
-    assistantMessage.reasoning = undefined
-    assistantMessage.content = `${result.summary}\n\n文件已在本机生成，点击文件卡片即可下载。`
-  } catch (error) {
-    assistantMessage.reasoning = undefined
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      assistantMessage.stopped = true
-      assistantMessage.content = `已停止 ${label} 任务。`
-    } else {
-      assistantMessage.content = `${label} 处理失败：${getErrorMessage(error)}`
-      ElMessage.error(getErrorMessage(error))
-    }
-  } finally {
-    assistantMessage.loading = false
-    conversation.updatedAt = Date.now()
-    if (chatController === controller) chatController = undefined
-    isGenerating.value = false
-    isStopping.value = false
-    scheduleWorkspaceSave()
-  }
+  assistantMessage.artifacts = [artifact]
+  assistantMessage.content = `${result.summary}\n\n文件已生成，点击文件卡片即可下载。${route.action === 'edit' ? '原文件已保留。' : ''}`
+  assistantMessage.generationStatus = undefined
+  return true
 }
 
 async function handleSubmit() {
-  if (isGenerating.value) return
+  if (isGenerating.value || attachmentProcessing.value) return
   if (composerMode.value === 'image') {
     await createImageInConversation()
-    return
-  }
-  if (activeComposerSkill.value === 'excel') {
-    await runExcelSkill()
-    return
-  }
-  if (
-    activeComposerSkill.value === 'word' ||
-    activeComposerSkill.value === 'pdf'
-  ) {
-    await runDocumentSkill(activeComposerSkill.value)
     return
   }
   const input = senderText.value.trim()
@@ -4580,6 +4237,8 @@ function handleFileChange(_uploadFile: UploadFile, uploadFiles: UploadFiles) {
 }
 
 function openImportDialog() {
+  importDiagnostic.value = null
+  importDiagnosticError.value = ''
   modelDrawerOpen.value = false
   imageStudioOpen.value = false
   importStep.value = 0
@@ -4791,6 +4450,7 @@ async function startImageModelImport() {
     importStep.value = 3
   } catch (error) {
     const failedStage = importStatus.value || '图片运行器启动与加载'
+    importFailureDetail.value = `${failedStage}失败：${getErrorMessage(error)}`
     importStatus.value = '导入失败'
     imageModelImportStatus.value = getErrorMessage(error)
     ElMessage.error(imageModelImportStatus.value)
@@ -4802,6 +4462,10 @@ async function startImageModelImport() {
 }
 
 async function startImport() {
+  if (importRunning.value) return
+  importFailureDetail.value = ''
+  importDiagnostic.value = null
+  importDiagnosticError.value = ''
   if (importMode.value === 'image') {
     await startImageModelImport()
     return
@@ -4925,7 +4589,7 @@ async function startImport() {
       guidance = `模型已经写入，但首次加载时显存或内存不足。请先把上下文设为 8K，关闭其他占用显卡的程序，或换用更小的 Q4_K_M 模型。原始信息：${rawMessage}`
     } else if (/no space left|disk quota/i.test(lowerMessage)) {
       guidance = `模型磁盘空间不足。请清理 ShotAI 数据目录后重试。原始信息：${rawMessage}`
-    } else if (/unexpected eof|digest mismatch|checksum|invalid.*gguf|failed to validate/i.test(lowerMessage)) {
+    } else if (/unexpected eof|digest mismatch|checksum|invalid.*gguf/i.test(lowerMessage)) {
       guidance = `GGUF 文件不完整、损坏或配套文件版本不一致。请核对 SHA-256，并确保所有分片或 mmproj 来自同一模型版本。原始信息：${rawMessage}`
     }
     const stageLabel = {
@@ -5040,16 +4704,23 @@ async function removeModel(model: LocalModel) {
 }
 
 async function removeAllConversationModels() {
-  if (!systemInfo.value.canManage || allModelsRemoving.value || models.length === 0) return
+  if (!systemInfo.value.canManage || allModelsRemoving.value || isGenerating.value) return
+  if (!systemInfo.value.ollama.isolated) {
+    ElMessage.warning('当前连接的是外部或非隔离 Ollama，为避免误删系统模型，不能执行完整清理。')
+    return
+  }
+  await refreshOllama()
   const targets = models.map((model) => ({ id: model.id, name: model.name }))
   try {
-    await ElMessageBox.confirm(
-      `将删除 ShotAI 当前目录中的 ${targets.length} 个 Ollama 模型（共 ${totalModelSize.value}）。重新安装不会自动恢复，之后需要重新导入。图片运行组件中的模型文件不受影响。`,
-      '清空 ShotAI 对话模型',
+    await ElMessageBox.prompt(
+      `将卸载并删除当前服务中的 ${targets.length} 个对话、视觉和 Embedding 模型（共 ${totalModelSize.value}），再清理无引用权重和临时文件。不可恢复，之后需要重新导入。不会删除会话、资料、原始下载文件、独立图片模型或系统 Ollama。请输入“清理模型”确认。`,
+      '完整清理对话与检索模型',
       {
         type: 'warning',
         confirmButtonText: '确认全部删除',
         cancelButtonText: '取消',
+        inputPattern: /^清理模型$/,
+        inputErrorMessage: '请输入：清理模型',
       },
     )
   } catch {
@@ -5060,14 +4731,15 @@ async function removeAllConversationModels() {
   const deletedIds = new Set<string>()
   const failures: string[] = []
   try {
-    for (const model of targets) {
-      try {
-        await deleteOllamaModel(model.id)
-        deletedIds.add(model.id)
-      } catch (error) {
-        failures.push(`${model.name}：${getErrorMessage(error)}`)
-      }
+    let job = await modelMaintenance(true)
+    while (job?.state === 'running') {
+      await new Promise(resolve => window.setTimeout(resolve, 1000))
+      job = await modelMaintenance()
     }
+    if (!job) throw new Error('清理任务记录不存在')
+    for (const id of job.deleted) deletedIds.add(id)
+    failures.push(...job.failures.map(item => `${item.model}：${item.error}`))
+    if (job.error) failures.push(job.error)
     conversations.value.forEach((conversation) => {
       if (deletedIds.has(conversation.modelId)) conversation.modelId = ''
     })
@@ -5077,6 +4749,7 @@ async function removeAllConversationModels() {
       imageModelId.value = AUTO_IMAGE_PROVIDER_ID
     }
     await refreshOllama()
+    const cleanup = job.cleanup || { removedFiles: 0, removedBytes: 0 }
     if (failures.length) {
       ElMessage.error({
         message: `已删除 ${deletedIds.size} 个，${failures.length} 个删除失败：${failures.join('；')}`,
@@ -5084,8 +4757,10 @@ async function removeAllConversationModels() {
         showClose: true,
       })
     } else {
-      ElMessage.success('ShotAI 对话模型已经全部删除')
+      ElMessage.success(`模型已卸载并删除，额外清理 ${cleanup.removedFiles} 个无引用或临时文件。`)
     }
+  } catch (error) {
+    ElMessage.error({ message: `清理状态获取失败：${getErrorMessage(error)}。已开始的服务端任务可能仍在执行，请勿反复提交。`, duration: 0, showClose: true })
   } finally {
     allModelsRemoving.value = false
   }
@@ -5142,6 +4817,16 @@ function handleAmbientPointer(event: PointerEvent) {
 
 watch(darkMode, applyDocumentTheme, { immediate: true })
 
+watch(() => pendingAttachments.value.map((attachment) => attachment.id), (current, previous) => {
+  for (const id of previous) {
+    if (current.includes(id)) continue
+    const retained = conversations.value.some((conversation) =>
+      conversation.messages.some((message) => message.attachments?.some((attachment) => attachment.id === id)),
+    )
+    if (!retained) void deleteLocalArtifact(id).catch((error) => console.warn('无法清理未发送附件', error))
+  }
+})
+
 watch(sidebarCollapsed, (collapsed) => {
   try {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0')
@@ -5157,15 +4842,8 @@ watch(monitorDrawerOpen, (open) => {
   }
 })
 
-watch(desktopPetEnabled, (enabled) => {
-  if (!enabled) {
-    desktopPetPanelOpen.value = false
-    pauseFocusSession()
-  }
-})
-
 watch(
-  [conversations, activeConversation, darkMode, showReasoning, desktopPetEnabled],
+  [conversations, activeConversation, darkMode, showReasoning],
   scheduleWorkspaceSave,
   { deep: true },
 )
@@ -5212,8 +4890,6 @@ onBeforeUnmount(() => {
   if (imageProgressTimer) window.clearInterval(imageProgressTimer)
   if (healthTimer) window.clearInterval(healthTimer)
   if (monitorTimer) window.clearInterval(monitorTimer)
-  if (focusSessionTimer) window.clearInterval(focusSessionTimer)
-  if (desktopPetReactionTimer) window.clearTimeout(desktopPetReactionTimer)
   if (messageScrollFrame) window.cancelAnimationFrame(messageScrollFrame)
   if (persistenceTimer) window.clearTimeout(persistenceTimer)
   if (knowledgePersistenceTimer) {
@@ -5813,9 +5489,9 @@ onBeforeUnmount(() => {
               :accept="
                 composerMode === 'image'
                   ? 'image/jpeg,image/png,image/webp'
-                  : activeSkillAccept
+                  : attachmentAccept
               "
-              :multiple="composerMode !== 'image' && !activeComposerSkill"
+              :multiple="composerMode !== 'image'"
               tabindex="-1"
               @change="handleAttachmentInput"
             />
@@ -5828,8 +5504,6 @@ onBeforeUnmount(() => {
                 {{
                   composerMode === 'image'
                     ? '支持 JPG、PNG 和 WebP，一次使用一张'
-                    : activeComposerSkill
-                      ? `支持 ${activeComposerSkill === 'excel' ? 'XLSX、XLS 和 CSV' : activeComposerSkill === 'word' ? 'DOCX' : 'PDF'}，一次处理一个文件`
                     : '支持常见图片、文本、PDF、Word 和 Excel 文件'
                 }}
               </span>
@@ -5893,32 +5567,8 @@ onBeforeUnmount(() => {
                     <el-icon><CloseBold /></el-icon>
                   </button>
                 </figure>
-                <article
-                  v-for="attachment in pendingAttachments"
-                  :key="attachment.id"
-                  class="pending-document"
-                >
-                  <span class="pending-document-icon">
-                    <el-icon><Document /></el-icon>
-                    {{ attachment.extension }}
-                  </span>
-                  <div>
-                    <strong>{{ attachment.name }}</strong>
-                    <span>
-                      {{ formatFileSize(attachment.size) }}
-                      <template v-if="attachment.characterCount">
-                        · {{ attachment.characterCount.toLocaleString() }} 字
-                      </template>
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    :aria-label="`移除 ${attachment.name}`"
-                    @click="removePendingAttachment(attachment.id)"
-                  >
-                    <el-icon><CloseBold /></el-icon>
-                  </button>
-                </article>
+                <PendingDocument v-for="attachment in pendingAttachments" :key="attachment.id"
+                  :attachment="attachment" @remove="removePendingAttachment" />
                 <div
                   v-if="attachmentProcessing"
                   class="image-processing-card"
@@ -5945,45 +5595,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div
-              v-if="activeComposerSkill"
-              class="composer-mode-strip composer-skill-strip"
-              :aria-label="activeSkillLabel"
-            >
-              <div class="composer-mode-title">
-                <span><el-icon><DataAnalysis /></el-icon></span>
-                <div>
-                  <strong>{{ activeSkillLabel }}</strong>
-                  <small>
-                    {{
-                      pendingAttachments.length
-                        ? `修改 ${pendingAttachments[0]?.name}${activeComposerSkill === 'excel' ? '' : ' · 按内容重新排版输出'}`
-                        : `生成新${activeComposerSkill === 'excel' ? ' Excel' : activeComposerSkill === 'word' ? ' Word 文档' : ' PDF'}，或先上传原文件再修改`
-                    }}
-                  </small>
-                </div>
-              </div>
-              <button
-                v-if="!pendingAttachments.length"
-                class="composer-reference-add"
-                type="button"
-                :disabled="isGenerating || attachmentProcessing"
-                @click="openAttachmentPicker"
-              >
-                <el-icon><DocumentAdd /></el-icon>
-                上传{{ activeComposerSkill === 'excel' ? ' Excel' : activeComposerSkill === 'word' ? ' Word' : ' PDF' }}进行修改
-              </button>
-              <button
-                class="composer-mode-close"
-                type="button"
-                :aria-label="`退出 ${activeSkillLabel}`"
-                :disabled="isGenerating"
-                @click="leaveActiveSkill"
-              >
-                <el-icon><CloseBold /></el-icon>
-              </button>
-            </div>
-            <div
-              v-else-if="composerMode === 'image'"
+              v-if="composerMode === 'image'"
               class="composer-mode-strip"
               aria-label="图片创作模式"
             >
@@ -6137,18 +5749,6 @@ onBeforeUnmount(() => {
                         <el-icon><FolderOpened /></el-icon>
                         选择我的资料
                       </el-dropdown-item>
-                      <el-dropdown-item command="excel-skill">
-                        <el-icon><DataAnalysis /></el-icon>
-                        Excel Skill
-                      </el-dropdown-item>
-                      <el-dropdown-item command="word-skill">
-                        <el-icon><Document /></el-icon>
-                        Word Skill
-                      </el-dropdown-item>
-                      <el-dropdown-item command="pdf-skill">
-                        <el-icon><Files /></el-icon>
-                        PDF Skill
-                      </el-dropdown-item>
                       <el-dropdown-item command="image-generation">
                         <el-icon><MagicStick /></el-icon>
                         创作图片
@@ -6173,11 +5773,7 @@ onBeforeUnmount(() => {
                     ? pendingImages.length
                       ? '描述想怎样修改这张图，按 Enter 开始'
                       : '描述想要的画面，按 Enter 开始生成'
-                    : activeComposerSkill
-                      ? pendingAttachments.length
-                        ? `描述需要修改的内容，按 Enter 执行 ${activeSkillLabel}`
-                        : `描述要生成的${activeComposerSkill === 'excel' ? '表格' : '文档'}，按 Enter 执行`
-                    : '输入问题，或直接说“帮我生成一张图片”'
+                    : '输入问题，或上传文件后描述分析、修改和输出要求'
                 "
                 @input="resizeComposer"
                 @keydown="handleComposerKeydown"
@@ -6192,8 +5788,6 @@ onBeforeUnmount(() => {
                         : '停止生成（Esc）'
                       : composerMode === 'image'
                         ? '生成图片（Enter）'
-                        : activeComposerSkill
-                          ? `执行 ${activeSkillLabel}（Enter）`
                         : composerImageIntent === 'edit'
                           ? '继续修改图片（Enter）'
                           : composerImageIntent === 'generate'
@@ -6222,18 +5816,16 @@ onBeforeUnmount(() => {
                   <span class="generation-pulse"></span>
                   {{
                     isStopping
-                      ? '正在停止'
+                      ? '取消中 · 正在结束本次请求'
                       : composerMode === 'image'
                         ? '正在生成图片 · ESC 可停止'
-                        : '正在生成 · ESC 可停止'
+                        : `${messages[messages.length - 1]?.generationStatus || '正在生成'} · ESC 可停止`
                   }}
                 </template>
                 <template v-else>
                   {{
                     composerMode === 'image'
                       ? '图片将在本地生成'
-                      : activeComposerSkill
-                        ? `${activeSkillLabel} 文件只在本机读取和生成`
                       : persistenceLabel
                   }}
                 </template>
@@ -6243,56 +5835,6 @@ onBeforeUnmount(() => {
           </div>
         </section>
       </main>
-
-      <section
-        v-if="desktopPetEnabled"
-        class="desktop-pet"
-        aria-label="桌面宠物陪伴"
-      >
-        <div
-          v-if="desktopPetPanelOpen"
-          class="desktop-pet-panel"
-          role="status"
-          aria-live="polite"
-        >
-          <button
-            class="desktop-pet-panel-close"
-            type="button"
-            aria-label="收起桌面宠物面板"
-            @click="desktopPetPanelOpen = false"
-          >
-            <el-icon><CloseBold /></el-icon>
-          </button>
-          <strong>{{ desktopPetMessage }}</strong>
-          <div class="desktop-pet-focus-time">{{ focusSessionLabel }}</div>
-          <div class="desktop-pet-actions">
-            <button type="button" @click="toggleFocusSession">
-              {{ focusSessionRunning ? '暂停陪伴' : '开始专注' }}
-            </button>
-            <button type="button" @click="resetFocusSession">重置</button>
-          </div>
-        </div>
-        <button
-          class="desktop-pet-character"
-          :class="{
-            'is-reacting': desktopPetReacting,
-            'is-focusing': focusSessionRunning,
-          }"
-          type="button"
-          aria-label="和桌面小猫互动"
-          @click="reactToDesktopPet"
-        >
-          <span class="cat-tail" aria-hidden="true"></span>
-          <span class="cat-body" aria-hidden="true"></span>
-          <span class="cat-head" aria-hidden="true">
-            <span class="cat-ear is-left"></span>
-            <span class="cat-ear is-right"></span>
-            <span class="cat-eye is-left"></span>
-            <span class="cat-eye is-right"></span>
-            <span class="cat-nose"></span>
-          </span>
-        </button>
-      </section>
 
       <el-drawer
         v-model="imageStudioOpen"
@@ -6632,14 +6174,14 @@ onBeforeUnmount(() => {
                 刷新
               </el-button>
               <el-button
-                v-if="systemInfo.canManage && models.length"
+                v-if="systemInfo.canManage"
                 type="danger"
                 plain
                 :loading="allModelsRemoving"
                 :disabled="isGenerating"
                 @click="removeAllConversationModels"
               >
-                清空模型
+                完整清理对话模型
               </el-button>
               <el-button
                 v-if="systemInfo.canManage"
@@ -6684,6 +6226,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <ModelHealthPanel :models="models" :can-manage="systemInfo.canManage" />
           <section
             v-for="section in managedModelSections"
             :key="section.key"
@@ -6843,7 +6386,7 @@ onBeforeUnmount(() => {
                       class="status-dot"
                       :class="{ muted: model.status !== 'ready' }"
                     ></span>
-                    {{ model.status === 'ready' ? '已载入' : '可以使用' }}
+                    {{ model.status === 'ready' ? '实际已载入' : '已安装 · 未加载' }}
                   </span>
                   <el-button
                     :disabled="isManagedModelSelected(model, section.key)"
@@ -7404,20 +6947,6 @@ onBeforeUnmount(() => {
               />
             </div>
 
-            <div class="theme-setting-row">
-              <div>
-                <el-icon><MagicStick /></el-icon>
-                <span>
-                  <strong>桌面宠物</strong>
-                  <small>在本机和内网页面显示陪伴工作的小猫</small>
-                </span>
-              </div>
-              <el-switch
-                v-model="desktopPetEnabled"
-                aria-label="开启桌面宠物"
-              />
-            </div>
-
             <div class="version-setting-row">
               <span>ShotAI {{ systemInfo.version }}</span>
               <small>
@@ -7614,8 +7143,12 @@ onBeforeUnmount(() => {
                   :loading="modelCacheCleaning"
                   @click="clearModelCacheFiles"
                 >
-                  清理
+                  清理临时文件
                 </el-button>
+              </div>
+              <div v-if="systemInfo.canManage">
+                <span><strong>完整清理对话与检索模型</strong><small>删除已导入模型、卸载内存并清理无引用权重；保留会话、资料与独立图片模型</small></span>
+                <el-button type="danger" plain :loading="allModelsRemoving" :disabled="isGenerating || modelCacheCleaning" @click="removeAllConversationModels">完整清理模型</el-button>
               </div>
               <div>
                 <span><strong>全部对话</strong><small>{{ conversations.length }} 条本地记录</small></span>
@@ -7769,7 +7302,7 @@ onBeforeUnmount(() => {
 
             <div class="monitor-runtime-grid">
               <div>
-                <span>计算后端</span>
+                <span>运行库配置（不代表实际加载）</span>
                 <strong>
                   {{ monitorComputeLibraryLabel(monitorSnapshot.performance.inference.computeLibrary) }}
                 </strong>
@@ -7788,7 +7321,7 @@ onBeforeUnmount(() => {
                   {{ monitorSnapshot.performance.inference.gpuLayers }} /
                   {{ monitorSnapshot.performance.inference.totalLayers }} 层
                 </strong>
-                <strong v-else>等待模型加载</strong>
+                <strong v-else>未取得可归属层数</strong>
               </div>
               <div>
                 <span>运行模式</span>
@@ -7799,7 +7332,7 @@ onBeforeUnmount(() => {
               <div>
                 <span>用户容量</span>
                 <strong>
-                  {{ monitorSnapshot.performance.concurrency.running + monitorSnapshot.performance.concurrency.queued }} /
+                  {{ monitorSnapshot.performance.concurrency.activeClients ?? monitorSnapshot.performance.concurrency.running + monitorSnapshot.performance.concurrency.queued }} /
                   {{ monitorSnapshot.performance.concurrency.maxActiveUsers }} 人
                 </strong>
               </div>
@@ -8133,7 +7666,7 @@ onBeforeUnmount(() => {
             </div>
             <div v-else class="progress-state">
               <div class="progress-value">{{ importProgress }}%</div>
-              <h3>{{ importProgress < 100 ? '正在导入模型' : '正在完成检查' }}</h3>
+              <h3>{{ importFailureDetail ? '模型导入未完成' : importProgress < 100 ? '正在导入模型' : '正在完成检查' }}</h3>
               <p>
                 {{ importStatus }}
               </p>
@@ -8141,9 +7674,14 @@ onBeforeUnmount(() => {
                 :percentage="importProgress"
                 :stroke-width="8"
                 :show-text="false"
+                :status="importFailureDetail ? 'exception' : undefined"
               />
             </div>
           </section>
+          <ImportFailurePanel v-if="importFailureDetail && !importRunning"
+            :detail="importFailureDetail" :saving="importDiagnosticSaving"
+            :diagnostic-error="importDiagnosticError" :diagnostic="importDiagnostic"
+            :is-host="systemInfo.isHost" @retry="startImport" @open-logs="openImportLogDirectory" />
 
           <section v-else class="complete-step">
             <div class="complete-icon"><el-icon><CircleCheck /></el-icon></div>
@@ -8194,7 +7732,7 @@ onBeforeUnmount(() => {
               {{ validationRunning ? '正在校验' : '下一步' }}
             </el-button>
             <el-button
-              v-else-if="importStep === 2 && !importRunning"
+              v-else-if="importStep === 2 && !importRunning && !importFailureDetail"
               type="primary"
               @click="startImport"
             >

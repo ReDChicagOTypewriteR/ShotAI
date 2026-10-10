@@ -10,6 +10,7 @@ const browser = await chromium.launch({
 })
 
 let chatCount = 0
+let routeCount = 0
 
 function modelList() {
   return {
@@ -66,7 +67,34 @@ try {
       })
     }
     if (pathname.endsWith('/chat')) {
+      const payload = request.postDataJSON()
+      const system = payload.messages.find((message) => message.role === 'system')?.content || ''
+      if (system.includes('任务调度器')) {
+        routeCount += 1
+        const sources = JSON.parse(system.split('\n').at(-1))
+        const choice = routeCount === 1
+          ? { action: 'create', kind: 'excel' }
+          : routeCount === 2
+            ? { action: 'chat' }
+            : routeCount === 5
+              ? { action: 'clarify', question: '需要修改哪个文件，以及哪些内容？' }
+              : { action: 'edit', kind: 'excel', sourceId: sources.find((source) => source.name === (routeCount === 4 ? '修改后的库存.xlsx' : '库存.xlsx'))?.id }
+        return route.fulfill({
+          contentType: 'application/x-ndjson',
+          body: JSON.stringify({ message: { content: JSON.stringify(choice) }, done: true }) + '\n',
+        })
+      }
+      if (!system.includes('文件任务规划器')) {
+        return route.fulfill({
+          contentType: 'application/x-ndjson',
+          body: JSON.stringify({ message: { content: '表格包含键盘库存，当前库存为20。' }, done: true }) + '\n',
+        })
+      }
       chatCount += 1
+      if (chatCount === 3) {
+        const user = payload.messages.findLast((message) => message.role === 'user')?.content || ''
+        if (!user.includes('B2="999"')) throw new Error('follow-up did not read the previous generated workbook')
+      }
       const plan =
         chatCount === 1
           ? {
@@ -86,10 +114,10 @@ try {
             }
           : {
               mode: 'edit',
-              fileName: '修改后的库存.xlsx',
-              summary: '已更新 Sheet1 的 B2',
+              fileName: chatCount === 3 ? '再次修改库存.xlsx' : '修改后的库存.xlsx',
+              summary: chatCount === 3 ? '已再次调整库存' : '已更新 Sheet1 的 B2',
               operations: [
-                { type: 'set_cell', sheet: 'Sheet1', cell: 'B2', value: 999 },
+                { type: 'set_cell', sheet: 'Sheet1', cell: 'B2', value: chatCount === 3 ? 1000 : 999 },
               ],
             }
       return route.fulfill({
@@ -119,11 +147,11 @@ try {
   )
 
   await page.getByLabel('添加文件或使用我的资料').click()
-  await page.getByRole('menuitem', { name: 'Excel Skill' }).click()
-  await page.getByText('生成新 Excel，或先上传原文件再修改').waitFor()
+  if (await page.getByRole('menuitem', { name: /Skill/ }).count()) throw new Error('manual Skill entry remains')
+  await page.keyboard.press('Escape')
 
   const editor = page.locator('.composer-textarea')
-  await editor.fill('生成一份包含一月和二月销售额的表格')
+  await editor.fill('生成一份包含一月和二月销售额的 Excel 文件')
   await editor.press('Enter')
   await page.getByText('已生成月度销售统计表').waitFor({ timeout: 20_000 })
 
@@ -151,12 +179,18 @@ try {
     type: 'buffer',
     bookType: 'xlsx',
   })
-  await page.locator('input[type="file"][accept=".xlsx,.xls,.csv"]').setInputFiles({
+  await page.locator('input[type="file"].visually-hidden-input').setInputFiles({
     name: '库存.xlsx',
     mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     buffer: sourceBuffer,
   })
-  await page.getByText('修改 库存.xlsx').waitFor()
+  await editor.fill('说明这个表格里有什么')
+  await editor.press('Enter')
+  await page.getByText('表格包含键盘库存，当前库存为20。').waitFor({ timeout: 20_000 })
+  if (await page.locator('.message-file-card.is-output').count() !== 1) throw new Error('analysis unexpectedly generated a file')
+  await page.waitForTimeout(1_000)
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.waitForFunction(() => Boolean(document.querySelector('.model-select')?.textContent?.trim()))
   await editor.fill('把 Sheet1 的 B2 改为 999')
   await editor.press('Enter')
   await page.getByText('已更新 Sheet1 的 B2').waitFor({ timeout: 20_000 })
@@ -181,6 +215,23 @@ try {
     throw new Error('Excel output cards were not restored from local storage')
   }
 
+  await editor.fill('再把刚才输出文件里的库存调整为1000')
+  await editor.press('Enter')
+  await page.getByText('已再次调整库存').waitFor({ timeout: 20_000 })
+  const followupDownloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: /再次修改库存\.xlsx/ }).click()
+  const followupDownload = await followupDownloadPromise
+  const followupPath = await followupDownload.path()
+  if (!followupPath) throw new Error('follow-up download unavailable')
+  const followupWorkbook = XLSX.read(await readFile(followupPath))
+  if (followupWorkbook.Sheets.Sheet1?.B2?.v !== 1000 || followupWorkbook.Sheets.Sheet1?.A2?.v !== '键盘') {
+    throw new Error('follow-up failed to modify the generated workbook')
+  }
+  await editor.fill('请再处理一下')
+  await editor.press('Enter')
+  await page.getByText('需要修改哪个文件，以及哪些内容？').waitFor({ timeout: 20_000 })
+  if (await page.locator('.message-file-card.is-output').count() !== 3) throw new Error('clarification unexpectedly created a file')
+
   await page.screenshot({
     path: '/private/tmp/shotai-excel-skill-check.png',
     fullPage: false,
@@ -188,7 +239,11 @@ try {
   console.log(
     JSON.stringify(
       {
-        skillEntry: true,
+        manualSkillEntry: false,
+        analysisWithoutFileGeneration: true,
+        editSourceRestoredAfterReload: true,
+        generatedFileFollowup: true,
+        clarificationWithoutMutation: true,
         workbookCreated: true,
         sourceWorkbookEdited: true,
         unrelatedCellsPreserved: true,

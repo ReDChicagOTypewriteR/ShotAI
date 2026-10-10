@@ -64,6 +64,12 @@ try {
       })
     }
     if (pathname.endsWith('/chat')) {
+      if (request.postDataJSON().messages?.some((message) => message.role === 'system' && message.content.includes('任务调度器'))) {
+        return route.fulfill({
+          contentType: 'application/x-ndjson',
+          body: JSON.stringify({ message: { content: '{"action":"chat"}' }, done: true }) + '\n',
+        })
+      }
       capturedChat = request.postDataJSON()
       return route.fulfill({
         status: 200,
