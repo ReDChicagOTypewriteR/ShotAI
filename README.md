@@ -76,6 +76,12 @@ ShotAI 通过运行组件支持多个开放模型厂商，不绑定单一模型�
 
 安装包与可选扩展发布到 [GitHub Releases](https://github.com/ReDChicagOTypewriteR/ShotAI/releases)。1.3.0 的核心安装包内置各平台 Ollama CUDA 12，不包含图片运行组件和模型权重。
 
+| 平台 / 方式 | 1.3.0 下载 |
+| --- | --- |
+| Windows x86_64 | [EXE 安装包](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.3.0/ShotAI-1.3.0-Windows-x64-Ollama-CUDA12-Setup.exe) |
+| Ubuntu 22.04 x86_64 | [DEB](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.3.0/ShotAI-1.3.0-Ubuntu-22.04-x86_64-Ollama-CUDA12.deb) · [AppImage](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.3.0/ShotAI-1.3.0-Ubuntu-22.04-x86_64-Ollama-CUDA12.AppImage) |
+| 图片运行扩展与校验文件 | [预发布资源](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/tag/v1.3.0) |
+
 ## 项目结构
 
 | 路径 | 用途 |
