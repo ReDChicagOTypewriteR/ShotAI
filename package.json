@@ -38,6 +38,7 @@
     "check:model-maintenance": "node scripts/check-model-maintenance.mjs",
     "check:backend-failures": "node scripts/check-backend-failures.mjs",
     "check:package-footprint": "node scripts/check-package-footprint.mjs",
+    "check:localization": "node scripts/check-localization.mjs",
     "check:model-import": "node scripts/check-unified-model-import.mjs",
     "check:model-center": "node scripts/check-model-center-ui.mjs",
     "check:improvements": "node scripts/check-platform-improvements.mjs",

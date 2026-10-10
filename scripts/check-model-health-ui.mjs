@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { chromium } from 'playwright-core'
 const browser = await chromium.launch({ headless: true, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' })
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } })
+  const page = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1440, height: 960 } })
   await page.route('**/shotai/system', (route) => route.fulfill({ json: { canManage: true, isHost: true, version: '1.2.0' } }))
   await page.route('**/image-runtime/status', (route) => route.fulfill({ json: { available: false, modelFiles: [] } }))
   await page.route('**/ollama/api/**', (route) => {

@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { t, locale } from './services/i18n'
 import ImportFailurePanel from './components/ImportFailurePanel.vue'
 import PendingDocument from './components/PendingDocument.vue'
+import LanguageSetting from './components/LanguageSetting.vue'
 import {
   computed,
   defineAsyncComponent,
@@ -481,7 +483,7 @@ const defaultConversationSettings: ConversationSettings = {
 const appLogoUrl = `${import.meta.env.BASE_URL}shotai-logo.svg`
 
 function createConversationRecord(
-  label = '新的离线对话',
+  label = t('新的离线对话'),
   id = `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
 ): ConversationRecord {
   const timestamp = Date.now()
@@ -491,7 +493,7 @@ function createConversationRecord(
     createdAt: timestamp,
     updatedAt: timestamp,
     modelId: '',
-    systemPrompt: '你是 ShotAI，一个完全离线运行、严谨可靠的中文助手。',
+    systemPrompt: 'You are ShotAI, a reliable offline assistant. Respond in the user’s language unless they request otherwise.',
     settings: { ...defaultConversationSettings },
     knowledgeBaseIds: [],
     messages: [],
@@ -499,7 +501,7 @@ function createConversationRecord(
 }
 
 const conversations = ref<ConversationRecord[]>([
-  createConversationRecord('离线环境能力说明', 'c-default'),
+  createConversationRecord(t('离线环境能力说明'), 'c-default'),
 ])
 
 const models = reactive<LocalModel[]>([])
@@ -597,8 +599,8 @@ type ManagedModelSectionKey = 'conversation' | 'knowledge' | 'image'
 const managedModelSections = computed(() => [
   {
     key: 'conversation' as ManagedModelSectionKey,
-    title: '对话与图片识别',
-    description: '用于日常对话、阅读文档和识别上传的图片',
+    title: t("对话与图片识别"),
+    description: t("用于日常对话、阅读文档和识别上传的图片"),
     models: models.filter(
       (model) =>
         !model.capabilities.includes('embedding') &&
@@ -607,14 +609,14 @@ const managedModelSections = computed(() => [
   },
   {
     key: 'knowledge' as ManagedModelSectionKey,
-    title: '资料查找',
-    description: '帮助系统从本地资料中更准确地找到相关内容',
+    title: t("资料查找"),
+    description: t("帮助系统从本地资料中更准确地找到相关内容"),
     models: embeddingModels.value,
   },
   {
     key: 'image' as ManagedModelSectionKey,
-    title: '图片生成与修改',
-    description: '负责生成图片、以图生图和修改已有图片',
+    title: t("图片生成与修改"),
+    description: t("负责生成图片、以图生图和修改已有图片"),
     models: imageGenerationModels.value,
   },
 ])
@@ -637,7 +639,7 @@ const imageProviderOptions = computed<ImageProviderOption[]>(() => [
         {
           id: 'local-runtime',
           label: imageRuntime.value.modelLabel,
-          detail: '本地图片组件',
+          detail: t("本地图片组件"),
           kind: 'local-runtime' as const,
           modelId: imageRuntime.value.modelLabel,
         },
@@ -646,7 +648,7 @@ const imageProviderOptions = computed<ImageProviderOption[]>(() => [
   ...imageGenerationModels.value.map((model) => ({
     id: `ollama:${model.id}`,
     label: model.name,
-    detail: `${model.size} · 本地 AI`,
+    detail: t("{0} · 本地 AI", [model.size]),
     kind: 'ollama' as const,
     modelId: model.id,
   })),
@@ -656,14 +658,14 @@ const hostPlatformLabel = computed(() => {
   if (systemInfo.value.platform === 'linux') return 'Ubuntu / Linux'
   if (systemInfo.value.platform === 'win32') return 'Windows'
   if (systemInfo.value.platform === 'darwin') return 'macOS'
-  return '主机'
+  return t("主机")
 })
 
 const ollamaRuntimeLabel = computed(() => {
-  if (systemInfo.value.ollama.source === 'embedded') return 'ShotAI 内置并独立运行'
-  if (systemInfo.value.ollama.source === 'managed') return '由 ShotAI 启动'
-  if (systemInfo.value.ollama.source === 'external') return '使用外部 Ollama'
-  return '尚未找到 AI 服务'
+  if (systemInfo.value.ollama.source === 'embedded') return t("ShotAI 内置并独立运行")
+  if (systemInfo.value.ollama.source === 'managed') return t("由 ShotAI 启动")
+  if (systemInfo.value.ollama.source === 'external') return t("使用外部 Ollama")
+  return t("尚未找到 AI 服务")
 })
 
 const selectedImageProvider = computed(() => {
@@ -682,40 +684,40 @@ type CapabilityKey = 'chat' | 'vision' | 'knowledge' | 'image'
 const capabilityOverview = computed(() => [
   {
     key: 'chat' as CapabilityKey,
-    title: '日常对话',
-    status: ollamaConnected.value && models.length ? '已就绪' : '需要准备',
+    title: t("日常对话"),
+    status: ollamaConnected.value && models.length ? t("已就绪") : t("需要准备"),
     detail: ollamaConnected.value
       ? models.length
-        ? `自动使用 ${selectedModel.value.name}`
-        : '还没有添加对话模型'
-      : 'AI 服务尚未启动',
+        ? t("自动使用 {0}", [selectedModel.value.name])
+        : t("还没有添加对话模型")
+      : t("AI 服务尚未启动"),
     ready: ollamaConnected.value && models.length > 0,
   },
   {
     key: 'vision' as CapabilityKey,
-    title: '图片识别',
-    status: preferredVisionModel.value ? '已就绪' : '需要准备',
+    title: t("图片识别"),
+    status: preferredVisionModel.value ? t("已就绪") : t("需要准备"),
     detail: preferredVisionModel.value
-      ? `上传图片后自动使用 ${preferredVisionModel.value.name}`
-      : '还没有可以识别图片的模型',
+      ? t("上传图片后自动使用 {0}", [preferredVisionModel.value.name])
+      : t("还没有可以识别图片的模型"),
     ready: Boolean(preferredVisionModel.value),
   },
   {
     key: 'knowledge' as CapabilityKey,
-    title: '资料查找',
-    status: '可以使用',
+    title: t("资料查找"),
+    status: t("可以使用"),
     detail: embeddingModels.value.length
-      ? `自动使用 ${embeddingModels.value[0]?.name}`
-      : '当前使用普通文字查找，也可以正常工作',
+      ? t("自动使用 {0}", [embeddingModels.value[0]?.name])
+      : t("当前使用普通文字查找，也可以正常工作"),
     ready: true,
   },
   {
     key: 'image' as CapabilityKey,
-    title: '图片创作',
-    status: selectedImageProvider.value ? '已就绪' : '需要准备',
+    title: t("图片创作"),
+    status: selectedImageProvider.value ? t("已就绪") : t("需要准备"),
     detail: selectedImageProvider.value
-      ? `生成时自动使用 ${selectedImageProvider.value.label}`
-      : '还没有准备图片模型文件',
+      ? t("生成时自动使用 {0}", [selectedImageProvider.value.label])
+      : t("还没有准备图片模型文件"),
     ready: Boolean(selectedImageProvider.value),
   },
 ])
@@ -851,19 +853,19 @@ const composerImageIntent = computed(() => {
 const composerIntentLabel = computed(() => {
   if (composerImageIntent.value === 'generate') {
     return selectedImageProvider.value
-      ? `将自动生成图片 · ${selectedImageProvider.value.label}`
-      : '识别为图片生成 · 尚未准备图片模型'
+      ? t("将自动生成图片 · {0}", [selectedImageProvider.value.label])
+      : t("识别为图片生成 · 尚未准备图片模型")
   }
   if (composerImageIntent.value === 'edit') {
     const hasReference =
       pendingImages.value.length > 0 || Boolean(latestConversationImageContext())
-    if (!hasReference) return '识别为图片修改 · 请先提供一张图片'
+    if (!hasReference) return t("识别为图片修改 · 请先提供一张图片")
     const provider = imageProviderOptions.value.find(
       (item) => item.kind === 'local-runtime',
     )
     return provider
-      ? `将继续修改${pendingImages.value.length ? '上传的图片' : '上一张图片'} · ${provider.label}`
-      : '识别为图片修改 · 尚未准备本地图片模型'
+      ? t("将继续修改{0} · {1}", [pendingImages.value.length ? '上传的图片' : '上一张图片', provider.label])
+      : t("识别为图片修改 · 尚未准备本地图片模型")
   }
   return ''
 })
@@ -898,21 +900,21 @@ const totalKnowledgeChunks = computed(() =>
 )
 
 const knowledgePersistenceLabel = computed(() => {
-  if (knowledgePersistenceState.value === 'loading') return '正在读取资料'
-  if (knowledgePersistenceState.value === 'saving') return '正在保存资料'
-  if (knowledgePersistenceState.value === 'error') return '资料保存失败'
-  return '资料已保存'
+  if (knowledgePersistenceState.value === 'loading') return t("正在读取资料")
+  if (knowledgePersistenceState.value === 'saving') return t("正在保存资料")
+  if (knowledgePersistenceState.value === 'error') return t("资料保存失败")
+  return t("资料已保存")
 })
 
 const activeConversationTitle = computed(
-  () => activeConversationRecord.value?.label ?? '新的离线对话',
+  () => activeConversationRecord.value?.label ?? t("新的离线对话"),
 )
 
 function getConversationGroup(updatedAt: number) {
   const elapsed = Date.now() - updatedAt
-  if (elapsed < 24 * 60 * 60 * 1000) return '今天'
-  if (elapsed < 7 * 24 * 60 * 60 * 1000) return '近 7 天'
-  return '更早'
+  if (elapsed < 24 * 60 * 60 * 1000) return t("今天")
+  if (elapsed < 7 * 24 * 60 * 60 * 1000) return t("近 7 天")
+  return t("更早")
 }
 
 const conversationItems = computed<ConversationRow[]>(() => {
@@ -948,7 +950,7 @@ const quickPrompts = [
 ]
 
 function useQuickPrompt(prompt: string) {
-  senderText.value = prompt
+  senderText.value = t(prompt)
   void nextTick(() => {
     resizeComposer()
     focusSenderEnd()
@@ -973,10 +975,10 @@ const visionModelRecommendations = [
 ]
 
 const persistenceLabel = computed(() => {
-  if (persistenceState.value === 'loading') return '正在读取本地数据'
-  if (persistenceState.value === 'saving') return '正在保存'
-  if (persistenceState.value === 'error') return '本地保存异常'
-  return '本地数据已保存'
+  if (persistenceState.value === 'loading') return t("正在读取本地数据")
+  if (persistenceState.value === 'saving') return t("正在保存")
+  if (persistenceState.value === 'error') return t("本地保存异常")
+  return t("本地数据已保存")
 })
 
 const totalModelBytes = ref(0)
@@ -985,77 +987,77 @@ const ollamaConnectionLabel = import.meta.env.DEV
   ? '这台电脑'
   : '运行服务的电脑'
 const ollamaStateLabel = computed(() => {
-  if (ollamaConnectionState.value === 'checking') return '正在检测'
-  if (ollamaConnectionState.value === 'online') return '服务在线'
-  if (ollamaConnectionState.value === 'degraded') return '连接异常'
-  return '服务离线'
+  if (ollamaConnectionState.value === 'checking') return t("正在检测")
+  if (ollamaConnectionState.value === 'online') return t("服务在线")
+  if (ollamaConnectionState.value === 'degraded') return t("连接异常")
+  return t("服务离线")
 })
 const ollamaStateCode = computed(() => {
-  if (ollamaConnectionState.value === 'checking') return '正在检查运行状态'
-  if (ollamaConnectionState.value === 'online') return 'AI 服务可以使用'
-  if (ollamaConnectionState.value === 'degraded') return '部分功能暂时不可用'
-  return 'AI 服务尚未启动'
+  if (ollamaConnectionState.value === 'checking') return t("正在检查运行状态")
+  if (ollamaConnectionState.value === 'online') return t("AI 服务可以使用")
+  if (ollamaConnectionState.value === 'degraded') return t("部分功能暂时不可用")
+  return t("AI 服务尚未启动")
 })
 const ollamaStateDescription = computed(() => {
   if (ollamaConnectionState.value === 'checking') {
-    return '正在检查服务和可用模型，请稍候'
+    return t("正在检查服务和可用模型，请稍候")
   }
   if (ollamaConnectionState.value === 'online') {
-    return `已连接到${ollamaConnectionLabel} · 找到 ${models.length} 个模型`
+    return t("已连接到{0} · 找到 {1} 个模型", [ollamaConnectionLabel, models.length])
   }
   if (ollamaConnectionState.value === 'degraded') {
-    return ollamaError.value || '部分功能暂时不可用，请重新检查'
+    return ollamaError.value || t("部分功能暂时不可用，请重新检查")
   }
-  return ollamaError.value || '请先启动 AI 服务，然后重新检查'
+  return ollamaError.value || t("请先启动 AI 服务，然后重新检查")
 })
 
 const systemChecks = computed(() => [
   {
-    label: 'AI 服务',
-    value: ollamaConnected.value ? '运行正常' : '未连接',
+    label: t("AI 服务"),
+    value: ollamaConnected.value ? t("运行正常") : t("未连接"),
     ok: ollamaConnected.value,
   },
   {
-    label: '服务版本',
+    label: t("服务版本"),
     value: ollamaVersion.value,
     ok: ollamaConnected.value,
   },
   {
-    label: '连接位置',
+    label: t("连接位置"),
     value: ollamaRuntimeLabel.value,
     ok: ollamaConnectionState.value === 'online',
   },
   {
-    label: '模型目录',
+    label: t("模型目录"),
     value: systemInfo.value.ollama.modelDirectory,
     ok: systemInfo.value.ollama.source !== 'unavailable',
   },
   {
-    label: '运行日志',
+    label: t("运行日志"),
     value: systemInfo.value.logs.directory,
     ok: true,
   },
   {
-    label: '模型信息',
+    label: t("模型信息"),
     value: ollamaDetailFailures.value
-      ? `${ollamaDetailFailures.value} 个读取失败`
-      : '读取正常',
+      ? t("{0} 个读取失败", [ollamaDetailFailures.value])
+      : t("读取正常"),
     ok:
       ollamaConnected.value &&
       ollamaConnectionState.value !== 'degraded',
   },
   {
-    label: '找到的模型',
-    value: `${models.length} 个`,
+    label: t("找到的模型"),
+    value: t("{0} 个", [models.length]),
     ok: models.length > 0,
   },
   {
-    label: '正在使用的模型',
-    value: `${runningModelIds.value.length} 个`,
+    label: t("正在使用的模型"),
+    value: t("{0} 个", [runningModelIds.value.length]),
     ok: ollamaConnected.value,
   },
   {
-    label: '最后检测',
+    label: t("最后检测"),
     value: ollamaLastCheckedAt.value,
     ok: ollamaConnected.value,
   },
@@ -1084,10 +1086,10 @@ function isSingleImageModelFile(file: File) {
 }
 
 function getImageImportFileRole(file: File) {
-  if (isImageGenerationMainFile(file) || isSingleImageModelFile(file)) return '图片主模型'
-  if (isImageVaeFile(file)) return '图片处理文件'
-  if (/qwen|text.?encoder/i.test(file.name)) return '文字理解文件'
-  return '配套文件'
+  if (isImageGenerationMainFile(file) || isSingleImageModelFile(file)) return t("图片主模型")
+  if (isImageVaeFile(file)) return t("图片处理文件")
+  if (/qwen|text.?encoder/i.test(file.name)) return t("文字理解文件")
+  return t("配套文件")
 }
 
 const imageImportAnalysis = computed(() => {
@@ -1105,10 +1107,10 @@ const imageImportAnalysis = computed(() => {
   const missing: string[] = []
 
   if (main) {
-    if (!encoder) missing.push(wantsEightB ? 'Qwen3-8B 文字理解文件' : 'Qwen3-4B 文字理解文件')
-    if (!vae) missing.push('FLUX.2 图片处理文件')
+    if (!encoder) missing.push(wantsEightB ? t("Qwen3-8B 文字理解文件") : t("Qwen3-4B 文字理解文件"))
+    if (!vae) missing.push(t("FLUX.2 图片处理文件"))
   } else if (!single) {
-    missing.push('图片主模型文件')
+    missing.push(t("图片主模型文件"))
   }
 
   return {
@@ -1133,7 +1135,7 @@ const importMetadata = computed(() => {
       ? imageImportAnalysis.value.main?.name ||
         imageImportAnalysis.value.single?.name ||
         files[0]?.name ||
-        '图片模型'
+        t("图片模型")
       : selectedImportFile.value?.name ?? 'Qwen3-8B-Q4_K_M.gguf'
   const totalSize = files.reduce((total, file) => total + file.size, 0)
   return {
@@ -1155,36 +1157,36 @@ const importDetection = computed(() => {
   if (!count) {
     return {
       tone: 'idle',
-      title: '选择下载好的模型文件',
-      detail: '直接选择下载页中的全部模型文件，系统会自动判断用途并组合，不需要先选择功能。',
+      title: t("选择下载好的模型文件"),
+      detail: t("直接选择下载页中的全部模型文件，系统会自动判断用途并组合，不需要先选择功能。"),
     }
   }
   if (importMode.value === 'image') {
     if (!imageImportAnalysis.value.configured) {
       return {
         tone: 'warning',
-        title: '已识别为图片创作模型，但文件还不完整',
-        detail: `还需要：${imageImportAnalysis.value.missing.join('、')}。请从同一个下载页面一次选全。`,
+        title: t("已识别为图片创作模型，但文件还不完整"),
+        detail: t("还需要：{0}。请从同一个下载页面一次选全。", [imageImportAnalysis.value.missing.join('、')]),
       }
     }
     return {
       tone: 'success',
-      title: '已识别为图片生成与修改模型',
-      detail: `共 ${selectedImageImportFiles.value.length} 个文件，将自动组合使用；与聊天模型重复的文件会直接复用，不会重复占用空间。`,
+      title: t("已识别为图片生成与修改模型"),
+      detail: t("共 {0} 个文件，将自动组合使用；与聊天模型重复的文件会直接复用，不会重复占用空间。", [selectedImageImportFiles.value.length]),
     }
   }
   if (!selectedImportFile.value && selectedProjectorFile.value) {
     return {
       tone: 'warning',
-      title: '还缺少主要模型文件',
-      detail: '当前只识别到图片配套文件，请返回同一个下载页，再选择体积更大的主要文件。',
+      title: t("还缺少主要模型文件"),
+      detail: t("当前只识别到图片配套文件，请返回同一个下载页，再选择体积更大的主要文件。"),
     }
   }
   if (selectedImportFile.value && selectedProjectorFile.value) {
     return {
       tone: 'success',
-      title: '已自动组合为图片模型',
-      detail: '两个文件会一起安装。安装完成后，系统还会自动验证是否真的可以识别图片。',
+      title: t("已自动组合为图片模型"),
+      detail: t("两个文件会一起安装。安装完成后，系统还会自动验证是否真的可以识别图片。"),
     }
   }
   if (selectedModelFiles.value.length > 1) {
@@ -1192,33 +1194,33 @@ const importDetection = computed(() => {
     return splitError
       ? {
           tone: 'warning',
-          title: '模型分片选择不完整或不匹配',
+          title: t("模型分片选择不完整或不匹配"),
           detail: splitError,
         }
       : {
           tone: 'success',
-          title: `已识别为 ${selectedModelFiles.value.length} 个 GGUF 分片`,
-          detail: '全部分片会按顺序校验、写入并组合为一个模型，不会把较小分片误认为图片配套文件。',
+          title: t("已识别为 {0} 个 GGUF 分片", [selectedModelFiles.value.length]),
+          detail: t("全部分片会按顺序校验、写入并组合为一个模型，不会把较小分片误认为图片配套文件。"),
         }
   }
   return {
     tone: 'success',
-    title: '已识别为单文件模型',
-    detail: '这个文件会作为普通聊天模型安装；如果下载页另有图片配套文件，请把两个文件一起选择。',
+    title: t("已识别为单文件模型"),
+    detail: t("这个文件会作为普通聊天模型安装；如果下载页另有图片配套文件，请把两个文件一起选择。"),
   }
 })
 
 const importCapabilityLabel = computed(() => {
   if (importMode.value === 'image') {
     return importRuntimePending.value
-      ? '模型文件完整，等待图片运行组件'
-      : '可以生成图片和修改图片'
+      ? t("模型文件完整，等待图片运行组件")
+      : t("可以生成图片和修改图片")
   }
   const capabilities = importDetectedCapabilities.value
-  if (capabilities.includes('vision')) return '可以聊天和识别图片'
-  if (capabilities.includes('embedding')) return '适合查找本地资料'
-  if (capabilities.includes('thinking')) return '可以聊天并显示回答思路'
-  return '可以正常聊天'
+  if (capabilities.includes('vision')) return t("可以聊天和识别图片")
+  if (capabilities.includes('embedding')) return t("适合查找本地资料")
+  if (capabilities.includes('thinking')) return t("可以聊天并显示回答思路")
+  return t("可以正常聊天")
 })
 
 function escapeHtml(value: string) {
@@ -1285,14 +1287,14 @@ async function saveModelImportFailureLog(stage: string, error: unknown) {
     if (result.saved) {
       importDiagnostic.value = result
       ElMessage.info({
-        message: `诊断文件已保存：${result.path}`,
+        message: t("诊断文件已保存：{0}", [result.path]),
         duration: 8_000,
         showClose: true,
       })
     }
   } catch (logError) {
     importDiagnosticError.value = getErrorMessage(logError)
-    ElMessage.warning(`诊断文件保存失败：${getErrorMessage(logError)}；原始导入错误仍保留在页面。`)
+    ElMessage.warning(t("诊断文件保存失败：{0}；原始导入错误仍保留在页面。", [getErrorMessage(logError)]))
   } finally {
     importDiagnosticSaving.value = false
   }
@@ -1315,7 +1317,7 @@ function getModelContextTokens(show?: OllamaShowResponse) {
 
 function getContextLabel(show?: OllamaShowResponse) {
   const value = getModelContextTokens(show)
-  if (!value) return '默认'
+  if (!value) return t("默认")
   return value >= 1024 ? `${Math.round(value / 1024)}K` : `${value}`
 }
 
@@ -1404,7 +1406,7 @@ async function restoreWorkspace() {
     persistenceState.value = 'saved'
   } catch (error) {
     persistenceState.value = 'error'
-    ElMessage.warning(`无法恢复本地对话：${getErrorMessage(error)}`)
+    ElMessage.warning(t("无法恢复本地对话：{0}", [getErrorMessage(error)]))
   } finally {
     storageReady.value = true
   }
@@ -1494,7 +1496,7 @@ async function restoreKnowledge() {
     knowledgePersistenceState.value = 'saved'
   } catch (error) {
     knowledgePersistenceState.value = 'error'
-    ElMessage.warning(`无法读取已保存的资料：${getErrorMessage(error)}`)
+    ElMessage.warning(t("无法读取已保存的资料：{0}", [getErrorMessage(error)]))
   } finally {
     knowledgeStorageReady.value = true
   }
@@ -1714,7 +1716,7 @@ async function refreshOllama(options: { announce?: boolean } = {}) {
       if (ollamaConnectionState.value === 'degraded') {
         ElMessage.warning(ollamaError.value)
       } else {
-        ElMessage.success(`AI 服务已连接，找到 ${models.length} 个模型`)
+        ElMessage.success(t("AI 服务已连接，找到 {0} 个模型", [models.length]))
       }
     }
   } catch (error) {
@@ -1743,7 +1745,7 @@ async function refreshOllama(options: { announce?: boolean } = {}) {
 }
 
 function nowTime() {
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(locale.value, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -1767,25 +1769,25 @@ function formatMonitorDuration(seconds = 0) {
   const days = Math.floor(seconds / 86400)
   const hours = Math.floor((seconds % 86400) / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
-  if (days) return `${days} 天 ${hours} 小时`
-  if (hours) return `${hours} 小时 ${minutes} 分钟`
-  return `${Math.max(0, minutes)} 分钟`
+  if (days) return t("{0} 天 {1} 小时", [days, hours])
+  if (hours) return t("{0} 小时 {1} 分钟", [hours, minutes])
+  return t("{0} 分钟", [Math.max(0, minutes)])
 }
 
 function monitorInferenceStateLabel(snapshot: MonitorSnapshot) {
-  if (snapshot.performance.modelOperation.active) return '正在导入模型'
+  if (snapshot.performance.modelOperation.active) return t("正在导入模型")
   const inference = snapshot.performance.inference
-  if (inference.state === 'running' && inference.backend === 'gpu') return 'GPU 推理'
-  if (inference.state === 'running' && inference.backend === 'mixed') return 'CPU / GPU 混合'
-  if (inference.state === 'running' && inference.backend === 'cpu') return 'CPU 推理'
-  if (inference.state === 'unavailable') return 'AI 服务未连接'
-  return '等待模型调用'
+  if (inference.state === 'running' && inference.backend === 'gpu') return t("GPU 推理")
+  if (inference.state === 'running' && inference.backend === 'mixed') return t("CPU / GPU 混合")
+  if (inference.state === 'running' && inference.backend === 'cpu') return t("CPU 推理")
+  if (inference.state === 'unavailable') return t("AI 服务未连接")
+  return t("等待模型调用")
 }
 
 function monitorComputeLibraryLabel(library: string) {
-  if (library === 'cuda_v12') return 'CUDA 12 · V100 兼容'
+  if (library === 'cuda_v12') return t("CUDA 12 · V100 兼容")
   if (library === 'cuda_v13') return 'CUDA 13'
-  return library || '自动选择'
+  return library || t("自动选择")
 }
 
 function friendlyModelCreateStatus(status: string, totalBytes: number) {
@@ -1816,7 +1818,7 @@ function monitorClientLabel(userAgent: string) {
   if (/Chrome\//i.test(userAgent)) return 'Google Chrome'
   if (/Firefox\//i.test(userAgent)) return 'Firefox'
   if (/Safari\//i.test(userAgent)) return 'Safari'
-  return '浏览器设备'
+  return t("浏览器设备")
 }
 
 function appendMonitorHistory(target: { value: number[] }, value = 0) {
@@ -1992,21 +1994,21 @@ async function renameConversation(conversationId = activeConversation.value) {
 
   try {
     const result = await ElMessageBox.prompt(
-      '名称只保存在本机，用于快速定位历史任务。',
-      '重命名对话',
+      t("名称只保存在本机，用于快速定位历史任务。"),
+      t("重命名对话"),
       {
         inputValue: conversation.label,
-        inputPlaceholder: '输入对话名称',
+        inputPlaceholder: t("输入对话名称"),
         inputValidator: (value) =>
-          value.trim().length > 0 || '对话名称不能为空',
-        inputErrorMessage: '对话名称不能为空',
-        confirmButtonText: '保存',
-        cancelButtonText: '取消',
+          value.trim().length > 0 || t("对话名称不能为空"),
+        inputErrorMessage: t("对话名称不能为空"),
+        confirmButtonText: t("保存"),
+        cancelButtonText: t("取消"),
       },
     )
     conversation.label = result.value.trim().slice(0, 60)
     conversation.updatedAt = Date.now()
-    ElMessage.success('对话名称已更新')
+    ElMessage.success(t("对话名称已更新"))
   } catch {
     // User cancelled.
   }
@@ -2020,12 +2022,12 @@ async function deleteConversation(conversationId = activeConversation.value) {
 
   try {
     await ElMessageBox.confirm(
-      `将删除“${conversation.label}”及其中的全部消息。此操作无法撤销。`,
-      '删除本地对话',
+      t("将删除“{0}”及其中的全部消息。此操作无法撤销。", [conversation.label]),
+      t("删除本地对话"),
       {
         type: 'warning',
-        confirmButtonText: '确认删除',
-        cancelButtonText: '取消',
+        confirmButtonText: t("确认删除"),
+        cancelButtonText: t("取消"),
         confirmButtonClass: 'danger-confirm-button',
       },
     )
@@ -2060,7 +2062,7 @@ async function deleteConversation(conversationId = activeConversation.value) {
   if (conversationId === activeConversation.value) {
     activeConversation.value = conversations.value[0].id
   }
-  ElMessage.success('本地对话已删除')
+  ElMessage.success(t("本地对话已删除"))
 }
 
 function handleConversationMenu(command: unknown, item: ConversationRow) {
@@ -2073,12 +2075,12 @@ async function clearCurrentConversation() {
   if (!conversation) return
   try {
     await ElMessageBox.confirm(
-      '将删除当前对话中的全部消息，但保留对话名称和设置。',
-      '清空消息',
+      t("将删除当前对话中的全部消息，但保留对话名称和设置。"),
+      t("清空消息"),
       {
         type: 'warning',
-        confirmButtonText: '确认清空',
-        cancelButtonText: '取消',
+        confirmButtonText: t("确认清空"),
+        cancelButtonText: t("取消"),
       },
     )
   } catch {
@@ -2097,7 +2099,7 @@ async function clearCurrentConversation() {
   )
   conversation.messages = []
   conversation.updatedAt = Date.now()
-  ElMessage.success('当前消息已清空')
+  ElMessage.success(t("当前消息已清空"))
 }
 
 function exportCurrentConversation() {
@@ -2147,7 +2149,7 @@ function exportCurrentConversation() {
   link.download = `${conversation.label.replace(/[\\/:*?"<>|]/g, '-')}.md`
   link.click()
   URL.revokeObjectURL(url)
-  ElMessage.success('对话已保存为文本文件')
+  ElMessage.success(t("对话已保存为文本文件"))
 }
 
 function handleConversationAction(command: string | number | object) {
@@ -2190,9 +2192,9 @@ async function writeClipboard(content: string) {
 async function copyMessage(content: string) {
   try {
     if (!(await writeClipboard(content))) throw new Error('copy failed')
-    ElMessage.success('内容已复制')
+    ElMessage.success(t("内容已复制"))
   } catch {
-    ElMessage.error('复制失败，请手动选择文本')
+    ElMessage.error(t("复制失败，请手动选择文本"))
   }
 }
 
@@ -2210,16 +2212,16 @@ async function handleAnswerClick(event: MouseEvent) {
       button.textContent = originalText || '复制代码'
     }, 1_200)
   } else {
-    ElMessage.error('复制失败，请手动选择代码')
+    ElMessage.error(t("复制失败，请手动选择代码"))
   }
 }
 
 async function copyInstallCommand(command: string) {
   try {
     if (!(await writeClipboard(command))) throw new Error('copy failed')
-    ElMessage.success('安装内容已复制')
+    ElMessage.success(t("安装内容已复制"))
   } catch {
-    ElMessage.error('复制失败，请手动选择这段内容')
+    ElMessage.error(t("复制失败，请手动选择这段内容"))
   }
 }
 
@@ -2265,18 +2267,18 @@ function resetConversationSettings() {
     '你是 ShotAI，一个完全离线运行、严谨可靠的中文助手。'
   conversation.settings = { ...defaultConversationSettings }
   conversation.updatedAt = Date.now()
-  ElMessage.success('当前对话参数已恢复默认')
+  ElMessage.success(t("当前对话参数已恢复默认"))
 }
 
 async function clearSavedConversations() {
   try {
     await ElMessageBox.confirm(
-      '将删除这个浏览器中保存的全部对话，模型和资料不会被删除。',
-      '清空全部对话',
+      t("将删除这个浏览器中保存的全部对话，模型和资料不会被删除。"),
+      t("清空全部对话"),
       {
         type: 'warning',
-        confirmButtonText: '确认清空',
-        cancelButtonText: '取消',
+        confirmButtonText: t("确认清空"),
+        cancelButtonText: t("取消"),
       },
     )
   } catch {
@@ -2290,22 +2292,22 @@ async function clearSavedConversations() {
   conversation.modelId = models[0]?.id ?? ''
   conversations.value = [conversation]
   activeConversation.value = conversation.id
-  ElMessage.success('全部对话已清空')
+  ElMessage.success(t("全部对话已清空"))
 }
 
 async function clearSavedKnowledge() {
   if (!totalKnowledgeDocuments.value) {
-    ElMessage.info('当前没有已添加的资料')
+    ElMessage.info(t("当前没有已添加的资料"))
     return
   }
   try {
     await ElMessageBox.confirm(
-      '将删除这个浏览器中保存的全部资料内容，不会删除电脑上的原文件。',
-      '清空全部资料',
+      t("将删除这个浏览器中保存的全部资料内容，不会删除电脑上的原文件。"),
+      t("清空全部资料"),
       {
         type: 'warning',
-        confirmButtonText: '确认清空',
-        cancelButtonText: '取消',
+        confirmButtonText: t("确认清空"),
+        cancelButtonText: t("取消"),
       },
     )
   } catch {
@@ -2320,7 +2322,7 @@ async function clearSavedKnowledge() {
   conversations.value.forEach((conversation) => {
     conversation.knowledgeBaseIds = []
   })
-  ElMessage.success('全部资料已清空')
+  ElMessage.success(t("全部资料已清空"))
 }
 
 async function refreshBrowserFiles() {
@@ -2345,12 +2347,12 @@ async function clearModelCacheFiles() {
   if (!systemInfo.value.canManage || modelCacheCleaning.value) return
   try {
     await ElMessageBox.confirm(
-      '将清理未完成的上传文件和已经没有模型使用的数据。已安装模型和图片模型不会被删除。',
-      '清理模型临时文件',
+      t("将清理未完成的上传文件和已经没有模型使用的数据。已安装模型和图片模型不会被删除。"),
+      t("清理模型临时文件"),
       {
         type: 'warning',
-        confirmButtonText: '开始清理',
-        cancelButtonText: '取消',
+        confirmButtonText: t("开始清理"),
+        cancelButtonText: t("取消"),
       },
     )
   } catch {
@@ -2362,8 +2364,8 @@ async function clearModelCacheFiles() {
     const result = await cleanupModelCache()
     ElMessage.success(
       result.removedFiles
-        ? `已清理 ${result.removedFiles} 个文件，共 ${formatFileSize(result.removedBytes)}`
-        : '没有发现需要清理的模型临时文件',
+        ? t("已清理 {0} 个文件，共 {1}", [result.removedFiles, formatFileSize(result.removedBytes)])
+        : t("没有发现需要清理的模型临时文件"),
     )
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
@@ -2486,17 +2488,17 @@ async function addMessageFiles(files: File[]) {
   if (attachmentProcessing.value) return
   if (composerMode.value === 'image') {
     if (!selectLocalImageEditProvider()) {
-      ElMessage.warning('这台主机还没有准备可以修改图片的本地组件')
+      ElMessage.warning(t("这台主机还没有准备可以修改图片的本地组件"))
       openImageStudio()
       return
     }
     const imageFile = files.find((file) => file.type.startsWith('image/'))
     if (!imageFile) {
-      ElMessage.warning('图片修改只能添加一张 JPG、PNG 或 WebP 图片')
+      ElMessage.warning(t("图片修改只能添加一张 JPG、PNG 或 WebP 图片"))
       return
     }
     if (files.filter((file) => file.type.startsWith('image/')).length > 1) {
-      ElMessage.warning('图片修改一次只能使用一张参考图，已选择第一张')
+      ElMessage.warning(t("图片修改一次只能使用一张参考图，已选择第一张"))
     }
     attachmentProcessing.value = true
     try {
@@ -2506,7 +2508,7 @@ async function addMessageFiles(files: File[]) {
       const ratio = preparedImage.width / preparedImage.height
       imageCanvas.value =
         ratio > 1.15 ? 'landscape' : ratio < 0.87 ? 'portrait' : 'square'
-      ElMessage.success('参考图已添加，请描述想要的修改')
+      ElMessage.success(t("参考图已添加，请描述想要的修改"))
     } catch (error) {
       ElMessage.error(getErrorMessage(error))
       await saveModelImportFailureLog('图片模型文件校验', error)
@@ -2517,7 +2519,7 @@ async function addMessageFiles(files: File[]) {
   }
   const remaining = MAX_MESSAGE_ATTACHMENT_COUNT - pendingFileCount()
   if (remaining <= 0) {
-    ElMessage.warning(`每条消息最多添加 ${MAX_MESSAGE_ATTACHMENT_COUNT} 个附件`)
+    ElMessage.warning(t("每条消息最多添加 {0} 个附件", [MAX_MESSAGE_ATTACHMENT_COUNT]))
     return
   }
 
@@ -2525,7 +2527,7 @@ async function addMessageFiles(files: File[]) {
   if (!candidates.length) return
   if (files.length > remaining) {
     ElMessage.warning(
-      `已达到附件上限，仅添加前 ${remaining} 个文件`,
+      t("已达到附件上限，仅添加前 {0} 个文件", [remaining]),
     )
   }
 
@@ -2546,7 +2548,7 @@ async function addMessageFiles(files: File[]) {
       }
     }
     if (pendingImages.value.length && !preferredVisionModel.value) {
-      ElMessage.warning('图片已添加，但还没有可以识别图片的模型')
+      ElMessage.warning(t("图片已添加，但还没有可以识别图片的模型"))
     }
   } finally {
     attachmentProcessing.value = false
@@ -2573,14 +2575,14 @@ async function refreshImageRuntime(options: { announce?: boolean } = {}) {
     }
     if (options.announce) {
       if (imageRuntime.value.serviceOnline) {
-        ElMessage.success('图片创作服务已经就绪')
+        ElMessage.success(t("图片创作服务已经就绪"))
       } else if (
         imageRuntime.value.runtimeFound &&
         imageRuntime.value.modelConfigured
       ) {
-        ElMessage.warning('文件已经找到，请重新启动 ShotAI 以载入图片模型')
+        ElMessage.warning(t("文件已经找到，请重新启动 ShotAI 以载入图片模型"))
       } else {
-        ElMessage.warning('图片组件尚未准备完整，请按照页面提示操作')
+        ElMessage.warning(t("图片组件尚未准备完整，请按照页面提示操作"))
       }
     }
   } finally {
@@ -2590,7 +2592,7 @@ async function refreshImageRuntime(options: { announce?: boolean } = {}) {
 
 function openImageModelPicker() {
   if (!systemInfo.value.canManage) {
-    ElMessage.warning('请在运行 ShotAI 的主机上添加图片模型')
+    ElMessage.warning(t("请在运行 ShotAI 的主机上添加图片模型"))
     return
   }
   openImportDialog()
@@ -2604,12 +2606,12 @@ async function removeImageModelFile(fileName: string) {
   if (!systemInfo.value.canManage || imageModelImporting.value) return
   try {
     await ElMessageBox.confirm(
-      `将从主机中删除“${fileName}”。删除后相关图片模型可能无法继续使用。`,
-      '删除图片模型文件',
+      t("将从主机中删除“{0}”。删除后相关图片模型可能无法继续使用。", [fileName]),
+      t("删除图片模型文件"),
       {
         type: 'warning',
-        confirmButtonText: '确认删除',
-        cancelButtonText: '取消',
+        confirmButtonText: t("确认删除"),
+        cancelButtonText: t("取消"),
       },
     )
   } catch {
@@ -2631,7 +2633,7 @@ async function removeImageModelFile(fileName: string) {
     await refreshImageRuntime()
     imageModelImportProgress.value = 100
     imageModelImportStatus.value = '图片模型列表已经更新'
-    ElMessage.success('图片模型文件已删除')
+    ElMessage.success(t("图片模型文件已删除"))
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   }
@@ -2688,7 +2690,7 @@ async function persistImageHistory() {
     )
   } catch (error) {
     console.error('ShotAI image history save failed', error)
-    ElMessage.warning('生成的图片暂时无法保存到历史记录')
+    ElMessage.warning(t("生成的图片暂时无法保存到历史记录"))
   }
 }
 
@@ -2700,7 +2702,7 @@ function openImageHistoryItem(item: ImageHistoryItem) {
 }
 
 function formatImageHistoryTime(timestamp: number) {
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(locale.value, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -2717,12 +2719,12 @@ async function removeImageHistoryItem(itemId: string) {
 async function clearGeneratedImageHistory() {
   try {
     await ElMessageBox.confirm(
-      '将清除这个浏览器中保存的全部生成图片，不会删除图片模型。',
-      '清空图片历史',
+      t("将清除这个浏览器中保存的全部生成图片，不会删除图片模型。"),
+      t("清空图片历史"),
       {
         type: 'warning',
-        confirmButtonText: '确认清空',
-        cancelButtonText: '取消',
+        confirmButtonText: t("确认清空"),
+        cancelButtonText: t("取消"),
       },
     )
   } catch {
@@ -2730,7 +2732,7 @@ async function clearGeneratedImageHistory() {
   }
   imageHistory.value = []
   await clearImageHistory()
-  ElMessage.success('图片历史已清空')
+  ElMessage.success(t("图片历史已清空"))
 }
 
 async function requestGeneratedImage(
@@ -2812,12 +2814,12 @@ async function rememberGeneratedImage(
 async function createImage() {
   const prompt = imagePrompt.value.trim()
   if (!prompt) {
-    ElMessage.warning('请先写下想要的画面')
+    ElMessage.warning(t("请先写下想要的画面"))
     return
   }
   const provider = selectedImageProvider.value
   if (!provider) {
-    ElMessage.warning('请先准备图片运行组件和模型文件')
+    ElMessage.warning(t("请先准备图片运行组件和模型文件"))
     return
   }
   if (imageGenerating.value) return
@@ -2849,7 +2851,7 @@ async function createImage() {
     )
     imageProgress.value = 100
     imageStatus.value = '图片已生成'
-    ElMessage.success('图片已生成')
+    ElMessage.success(t("图片已生成"))
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       imageStatus.value = '已停止'
@@ -2886,25 +2888,25 @@ function downloadGeneratedImage() {
   document.body.appendChild(link)
   link.click()
   link.remove()
-  ElMessage.success('图片已保存')
+  ElMessage.success(t("图片已保存"))
 }
 
 function useImageComposer() {
   if (!selectedImageProvider.value) {
-    ElMessage.warning('请先准备图片运行组件和模型文件')
+    ElMessage.warning(t("请先准备图片运行组件和模型文件"))
     openImageStudio()
     return
   }
   if (pendingAttachments.value.length) {
-    ElMessage.warning('图片创作不能使用文档，请先移除已添加的文档')
+    ElMessage.warning(t("图片创作不能使用文档，请先移除已添加的文档"))
     return
   }
   if (pendingImages.value.length > 1) {
-    ElMessage.warning('图片修改一次只能使用一张参考图，请先移除多余图片')
+    ElMessage.warning(t("图片修改一次只能使用一张参考图，请先移除多余图片"))
     return
   }
   if (pendingImages.value.length && !selectLocalImageEditProvider()) {
-    ElMessage.warning('这台主机还没有准备可以修改图片的本地组件')
+    ElMessage.warning(t("这台主机还没有准备可以修改图片的本地组件"))
     openImageStudio()
     return
   }
@@ -2999,15 +3001,15 @@ function appendImageIntentNotice(
 async function createImageInConversation(route?: ImageIntentRoute) {
   const prompt = senderText.value.trim()
   if (!prompt) {
-    ElMessage.warning('请先写下想要的画面')
+    ElMessage.warning(t("请先写下想要的画面"))
     return
   }
   if (pendingAttachments.value.length) {
-    ElMessage.warning('图片创作不能使用文档，请先移除文档附件')
+    ElMessage.warning(t("图片创作不能使用文档，请先移除文档附件"))
     return
   }
   if (pendingImages.value.length > 1) {
-    ElMessage.warning('图片修改一次只能使用一张参考图')
+    ElMessage.warning(t("图片修改一次只能使用一张参考图"))
     return
   }
   const inferredRoute =
@@ -3178,7 +3180,7 @@ function downloadMessageImage(image: MessageImage) {
   document.body.appendChild(link)
   link.click()
   link.remove()
-  ElMessage.success('图片已保存')
+  ElMessage.success(t("图片已保存"))
 }
 
 function handleComposerResourceAction(command: string | number | object) {
@@ -3339,20 +3341,20 @@ function getEffectiveContextLength(
 async function createNewKnowledgeBase() {
   try {
     const result = await ElMessageBox.prompt(
-      '添加的资料只保存在当前设备。',
-      '新建资料夹',
+      t("添加的资料只保存在当前设备。"),
+      t("新建资料夹"),
       {
-        inputPlaceholder: '例如：单位制度文件',
+        inputPlaceholder: t("例如：单位制度文件"),
         inputValidator: (value) =>
-          value.trim().length > 0 || '资料夹名称不能为空',
-        confirmButtonText: '创建',
-        cancelButtonText: '取消',
+          value.trim().length > 0 || t("资料夹名称不能为空"),
+        confirmButtonText: t("创建"),
+        cancelButtonText: t("取消"),
       },
     )
     const knowledgeBase = createKnowledgeBase(result.value.trim().slice(0, 50))
     knowledgeBases.value.unshift(knowledgeBase)
     selectedKnowledgeBaseId.value = knowledgeBase.id
-    ElMessage.success('资料夹已创建')
+    ElMessage.success(t("资料夹已创建"))
   } catch {
     // User cancelled.
   }
@@ -3361,19 +3363,19 @@ async function createNewKnowledgeBase() {
 async function renameKnowledgeBase(knowledgeBase: KnowledgeBase) {
   try {
     const result = await ElMessageBox.prompt(
-      '名称只用于整理你自己的资料。',
-      '重命名资料夹',
+      t("名称只用于整理你自己的资料。"),
+      t("重命名资料夹"),
       {
         inputValue: knowledgeBase.name,
         inputValidator: (value) =>
-          value.trim().length > 0 || '资料夹名称不能为空',
-        confirmButtonText: '保存',
-        cancelButtonText: '取消',
+          value.trim().length > 0 || t("资料夹名称不能为空"),
+        confirmButtonText: t("保存"),
+        cancelButtonText: t("取消"),
       },
     )
     knowledgeBase.name = result.value.trim().slice(0, 50)
     knowledgeBase.updatedAt = Date.now()
-    ElMessage.success('资料夹名称已更新')
+    ElMessage.success(t("资料夹名称已更新"))
   } catch {
     // User cancelled.
   }
@@ -3382,12 +3384,12 @@ async function renameKnowledgeBase(knowledgeBase: KnowledgeBase) {
 async function deleteKnowledgeBase(knowledgeBase: KnowledgeBase) {
   try {
     await ElMessageBox.confirm(
-      `将删除“${knowledgeBase.name}”及其中的 ${knowledgeBase.documents.length} 份资料。此操作无法撤销。`,
-      '删除资料夹',
+      t("将删除“{0}”及其中的 {1} 份资料。此操作无法撤销。", [knowledgeBase.name, knowledgeBase.documents.length]),
+      t("删除资料夹"),
       {
         type: 'warning',
-        confirmButtonText: '确认删除',
-        cancelButtonText: '取消',
+        confirmButtonText: t("确认删除"),
+        cancelButtonText: t("取消"),
         confirmButtonClass: 'danger-confirm-button',
       },
     )
@@ -3407,7 +3409,7 @@ async function deleteKnowledgeBase(knowledgeBase: KnowledgeBase) {
     knowledgeBases.value = [createKnowledgeBase()]
   }
   selectedKnowledgeBaseId.value = knowledgeBases.value[0].id
-  ElMessage.success('资料夹已删除')
+  ElMessage.success(t("资料夹已删除"))
 }
 
 function toggleConversationKnowledgeBase(
@@ -3502,12 +3504,12 @@ async function importKnowledgeDocument(file: File) {
           delete chunk.vector
         })
         ElMessage.warning(
-          `智能查找准备失败，仍可使用普通文字查找：${getErrorMessage(error)}`,
+          t("智能查找准备失败，仍可使用普通文字查找：{0}", [getErrorMessage(error)]),
         )
       }
     } else {
       knowledgeImportProgress.value = 90
-      ElMessage.warning('未安装资料查找助手，将使用普通文字查找')
+      ElMessage.warning(t("未安装资料查找助手，将使用普通文字查找"))
     }
 
     document.status = 'ready'
@@ -3515,7 +3517,7 @@ async function importKnowledgeDocument(file: File) {
     knowledgeImportProgress.value = 100
     knowledgeImportStatus.value = `${file.name} 已整理完成`
     await persistKnowledge()
-    ElMessage.success('资料已添加，可以在对话中使用')
+    ElMessage.success(t("资料已添加，可以在对话中使用"))
   } catch (error) {
     knowledgeImportStatus.value = getErrorMessage(error)
     ElMessage.error(getErrorMessage(error))
@@ -3531,11 +3533,11 @@ function handleKnowledgeFileChange(uploadFile: UploadFile) {
 async function rebuildKnowledgeIndex() {
   const knowledgeBase = selectedKnowledgeBase.value
   if (!knowledgeBase?.chunks.length) {
-    ElMessage.warning('当前资料夹中没有可以整理的文件')
+    ElMessage.warning(t("当前资料夹中没有可以整理的文件"))
     return
   }
   if (!embeddingModelId.value) {
-    ElMessage.warning('请先安装资料查找助手')
+    ElMessage.warning(t("请先安装资料查找助手"))
     return
   }
 
@@ -3554,10 +3556,10 @@ async function rebuildKnowledgeIndex() {
     knowledgeBase.updatedAt = Date.now()
     await persistKnowledge()
     knowledgeImportStatus.value = '资料已重新整理完成'
-    ElMessage.success('当前资料已重新整理')
+    ElMessage.success(t("当前资料已重新整理"))
   } catch (error) {
     knowledgeImportStatus.value = getErrorMessage(error)
-    ElMessage.error(`重建失败：${getErrorMessage(error)}`)
+    ElMessage.error(t("重建失败：{0}", [getErrorMessage(error)]))
   } finally {
     knowledgeImporting.value = false
   }
@@ -3568,12 +3570,12 @@ async function deleteKnowledgeDocument(document: KnowledgeDocument) {
   if (!knowledgeBase) return
   try {
     await ElMessageBox.confirm(
-      `将从“${knowledgeBase.name}”中删除 ${document.name}。`,
-      '删除这份资料',
+      t("将从“{0}”中删除 {1}。", [knowledgeBase.name, document.name]),
+      t("删除这份资料"),
       {
         type: 'warning',
-        confirmButtonText: '确认删除',
-        cancelButtonText: '取消',
+        confirmButtonText: t("确认删除"),
+        cancelButtonText: t("取消"),
       },
     )
   } catch {
@@ -3587,7 +3589,7 @@ async function deleteKnowledgeDocument(document: KnowledgeDocument) {
     (chunk) => chunk.documentId !== document.id,
   )
   knowledgeBase.updatedAt = Date.now()
-  ElMessage.success('资料已删除')
+  ElMessage.success(t("资料已删除"))
 }
 
 async function retrieveConversationKnowledge(
@@ -3660,12 +3662,12 @@ function stopGeneration() {
 
 function ensureChatReady() {
   if (!ollamaConnected.value) {
-    ElMessage.error('AI 服务尚未启动，请启动后重新检查')
+    ElMessage.error(t("AI 服务尚未启动，请启动后重新检查"))
     diagnosticsDrawerOpen.value = true
     return false
   }
   if (!currentModelId.value) {
-    ElMessage.warning('还没有可用模型，请先添加下载好的模型文件')
+    ElMessage.warning(t("还没有可用模型，请先添加下载好的模型文件"))
     modelDrawerOpen.value = true
     return false
   }
@@ -4032,7 +4034,7 @@ async function handleSubmit() {
     ...attachment,
   }))
   if (!input && !submittedImages.length && !submittedAttachments.length) {
-    ElMessage.warning('请输入问题或添加附件后再发送')
+    ElMessage.warning(t("请输入问题或添加附件后再发送"))
     return
   }
   const imageRoute = inferImageConversationIntent(
@@ -4041,7 +4043,7 @@ async function handleSubmit() {
   )
   if (imageRoute.intent !== 'chat') {
     if (submittedAttachments.length) {
-      ElMessage.warning('图片生成和修改暂时不能同时读取文档，请先移除文档附件')
+      ElMessage.warning(t("图片生成和修改暂时不能同时读取文档，请先移除文档附件"))
       return
     }
     await createImageInConversation(imageRoute)
@@ -4049,7 +4051,7 @@ async function handleSubmit() {
   }
   if (!ensureChatReady()) return
   if (submittedImages.length && !preferredVisionModel.value) {
-    ElMessage.error('还没有可以识别图片的模型，请先添加一个')
+    ElMessage.error(t("还没有可以识别图片的模型，请先添加一个"))
     modelDrawerOpen.value = true
     return
   }
@@ -4107,20 +4109,20 @@ async function editUserMessage(message: DemoMessage) {
 
   try {
     const result = await ElMessageBox.prompt(
-      '保存后会删除这条问题之后的回答，并基于修改后的内容重新生成。',
-      '编辑问题并重新生成',
+      t("保存后会删除这条问题之后的回答，并基于修改后的内容重新生成。"),
+      t("编辑问题并重新生成"),
       {
         inputValue: message.content,
         inputType: 'textarea',
-        inputPlaceholder: '输入修改后的问题',
+        inputPlaceholder: t("输入修改后的问题"),
         inputValidator: (value) => {
           const length = value.trim().length
-          if (!length) return '问题不能为空'
-          if (length > 8000) return '问题不能超过 8000 个字'
+          if (!length) return t("问题不能为空")
+          if (length > 8000) return t("问题不能超过 8000 个字")
           return true
         },
-        confirmButtonText: '保存并重新生成',
-        cancelButtonText: '取消',
+        confirmButtonText: t("保存并重新生成"),
+        cancelButtonText: t("取消"),
       },
     )
     message.content = result.value.trim()
@@ -4266,17 +4268,17 @@ async function nextImportStep() {
     !selectedImportFile.value &&
     selectedImageImportFiles.value.length === 0
   ) {
-    ElMessage.warning('请选择主要模型文件')
+    ElMessage.warning(t("请选择主要模型文件"))
     return
   }
   if (importStep.value === 1 && !importName.value.trim()) {
-    ElMessage.warning('请填写模型显示名称')
+    ElMessage.warning(t("请填写模型显示名称"))
     return
   }
 
   if (importStep.value === 0 && importMode.value === 'image') {
     if (!imageImportAnalysis.value.configured) {
-      ElMessage.warning(`文件还不完整：${imageImportAnalysis.value.missing.join('、')}`)
+      ElMessage.warning(t("文件还不完整：{0}", [imageImportAnalysis.value.missing.join('、')]))
       return
     }
     validationRunning.value = true
@@ -4343,11 +4345,11 @@ async function nextImportStep() {
 async function startImageModelImport() {
   const files = selectedImageImportFiles.value
   if (!files.length || !imageImportAnalysis.value.configured) {
-    ElMessage.error('图片模型文件还没有准备完整')
+    ElMessage.error(t("图片模型文件还没有准备完整"))
     return
   }
   if (files.some((file) => !importFileShas.value[file.name])) {
-    ElMessage.error('模型文件尚未完成检查')
+    ElMessage.error(t("模型文件尚未完成检查"))
     return
   }
 
@@ -4472,11 +4474,11 @@ async function startImport() {
   }
   const file = selectedImportFile.value
   if (!file || selectedModelFiles.value.length === 0) {
-    ElMessage.error('模型文件尚未完成校验')
+    ElMessage.error(t("模型文件尚未完成校验"))
     return
   }
   if (!ollamaConnected.value) {
-    ElMessage.error('AI 服务连接已断开，请重新检查')
+    ElMessage.error(t("AI 服务连接已断开，请重新检查"))
     return
   }
 
@@ -4613,13 +4615,13 @@ async function startImport() {
 function finishImport() {
   importDialogOpen.value = false
   if (importMode.value === 'image' && importRuntimePending.value) {
-    ElMessage.warning('图片模型文件已保存，安装运行组件后即可使用')
+    ElMessage.warning(t("图片模型文件已保存，安装运行组件后即可使用"))
     return
   }
   ElMessage.success(
     importMode.value === 'image'
-      ? '图片模型已经可以使用'
-      : '模型已导入并设为当前模型',
+      ? t("图片模型已经可以使用")
+      : t("模型已导入并设为当前模型"),
   )
 }
 
@@ -4650,36 +4652,36 @@ function useManagedModel(
 ) {
   if (section === 'knowledge') {
     embeddingModelId.value = model.id
-    ElMessage.success(`资料查找将使用 ${model.name}`)
+    ElMessage.success(t("资料查找将使用 {0}", [model.name]))
     return
   }
   if (section === 'image') {
     imageModelId.value = `ollama:${model.id}`
-    ElMessage.success(`图片创作将使用 ${model.name}`)
+    ElMessage.success(t("图片创作将使用 {0}", [model.name]))
     return
   }
   currentModelId.value = model.id
-  ElMessage.success(`当前对话将使用 ${model.name}`)
+  ElMessage.success(t("当前对话将使用 {0}", [model.name]))
 }
 
 function useLocalImageRuntime() {
   if (!imageRuntime.value.serviceOnline) {
-    ElMessage.warning('图片模型还没有成功载入，请先检查文件和运行状态')
+    ElMessage.warning(t("图片模型还没有成功载入，请先检查文件和运行状态"))
     return
   }
   imageModelId.value = 'local-runtime'
-  ElMessage.success(`图片创作将使用 ${imageRuntime.value.modelLabel}`)
+  ElMessage.success(t("图片创作将使用 {0}", [imageRuntime.value.modelLabel]))
 }
 
 async function removeModel(model: LocalModel) {
   try {
     await ElMessageBox.confirm(
-      `将从运行服务的电脑中删除“${model.name}”，之后如需使用必须重新安装。`,
-      '删除模型',
+      t("将从运行服务的电脑中删除“{0}”，之后如需使用必须重新安装。", [model.name]),
+      t("删除模型"),
       {
         type: 'warning',
-        confirmButtonText: '确认删除',
-        cancelButtonText: '取消',
+        confirmButtonText: t("确认删除"),
+        cancelButtonText: t("取消"),
       },
     )
   } catch {
@@ -4697,30 +4699,30 @@ async function removeModel(model: LocalModel) {
     conversations.value.forEach((conversation) => {
       if (!conversation.modelId) conversation.modelId = replacement
     })
-    ElMessage.success('模型已删除')
+    ElMessage.success(t("模型已删除"))
   } catch (error) {
-    ElMessage.error(`删除失败：${getErrorMessage(error)}`)
+    ElMessage.error(t("删除失败：{0}", [getErrorMessage(error)]))
   }
 }
 
 async function removeAllConversationModels() {
   if (!systemInfo.value.canManage || allModelsRemoving.value || isGenerating.value) return
   if (!systemInfo.value.ollama.isolated) {
-    ElMessage.warning('当前连接的是外部或非隔离 Ollama，为避免误删系统模型，不能执行完整清理。')
+    ElMessage.warning(t("当前连接的是外部或非隔离 Ollama，为避免误删系统模型，不能执行完整清理。"))
     return
   }
   await refreshOllama()
   const targets = models.map((model) => ({ id: model.id, name: model.name }))
   try {
     await ElMessageBox.prompt(
-      `将卸载并删除当前服务中的 ${targets.length} 个对话、视觉和 Embedding 模型（共 ${totalModelSize.value}），再清理无引用权重和临时文件。不可恢复，之后需要重新导入。不会删除会话、资料、原始下载文件、独立图片模型或系统 Ollama。请输入“清理模型”确认。`,
-      '完整清理对话与检索模型',
+      t("将卸载并删除当前服务中的 {0} 个对话、视觉和 Embedding 模型（共 {1}），再清理无引用权重和临时文件。不可恢复，之后需要重新导入。不会删除会话、资料、原始下载文件、独立图片模型或系统 Ollama。请输入“清理模型”确认。", [targets.length, totalModelSize.value]),
+      t("完整清理对话与检索模型"),
       {
         type: 'warning',
-        confirmButtonText: '确认全部删除',
-        cancelButtonText: '取消',
-        inputPattern: /^清理模型$/,
-        inputErrorMessage: '请输入：清理模型',
+        confirmButtonText: t("确认全部删除"),
+        cancelButtonText: t("取消"),
+        inputPattern: locale.value === 'en' ? /^DELETE$/ : /^清理模型$/,
+        inputErrorMessage: t("请输入：清理模型"),
       },
     )
   } catch {
@@ -4752,15 +4754,15 @@ async function removeAllConversationModels() {
     const cleanup = job.cleanup || { removedFiles: 0, removedBytes: 0 }
     if (failures.length) {
       ElMessage.error({
-        message: `已删除 ${deletedIds.size} 个，${failures.length} 个删除失败：${failures.join('；')}`,
+        message: t("已删除 {0} 个，{1} 个删除失败：{2}", [deletedIds.size, failures.length, failures.join('；')]),
         duration: 0,
         showClose: true,
       })
     } else {
-      ElMessage.success(`模型已卸载并删除，额外清理 ${cleanup.removedFiles} 个无引用或临时文件。`)
+      ElMessage.success(t("模型已卸载并删除，额外清理 {0} 个无引用或临时文件。", [cleanup.removedFiles]))
     }
   } catch (error) {
-    ElMessage.error({ message: `清理状态获取失败：${getErrorMessage(error)}。已开始的服务端任务可能仍在执行，请勿反复提交。`, duration: 0, showClose: true })
+    ElMessage.error({ message: t("清理状态获取失败：{0}。已开始的服务端任务可能仍在执行，请勿反复提交。", [getErrorMessage(error)]), duration: 0, showClose: true })
   } finally {
     allModelsRemoving.value = false
   }
@@ -4787,7 +4789,7 @@ async function regenerateLast() {
     .slice(0, assistantIndex)
     .some((message) => message.role === 'user')
   if (assistantIndex <= 0 || !hasUserBefore) {
-    ElMessage.warning('当前没有可以重新生成的回答')
+    ElMessage.warning(t("当前没有可以重新生成的回答"))
     return
   }
 
@@ -4910,7 +4912,7 @@ onBeforeUnmount(() => {
         'sidebar-collapsed': sidebarCollapsed,
       }"
     >
-      <a class="skip-link" href="#main-content">跳转到主要内容</a>
+      <a class="skip-link" href="#main-content">{{ t("跳转到主要内容") }}</a>
 
       <aside
         id="conversation-sidebar"
@@ -4919,7 +4921,7 @@ onBeforeUnmount(() => {
           'is-open': sidebarOpen,
           'is-collapsed': sidebarCollapsed,
         }"
-        aria-label="对话导航"
+        :aria-label="t('对话导航')"
       >
         <div class="brand-block">
           <div class="brand-mark" aria-hidden="true">
@@ -4927,16 +4929,16 @@ onBeforeUnmount(() => {
           </div>
           <div class="brand-copy">
             <div class="brand-name">SHOT<span>AI</span></div>
-            <div class="brand-subtitle">完全离线的智能助手</div>
+            <div class="brand-subtitle">{{ t("完全离线的智能助手") }}</div>
           </div>
         </div>
         <button
           class="sidebar-collapse-toggle"
           type="button"
-          :aria-label="sidebarCollapsed ? '展开对话侧边栏' : '折叠对话侧边栏'"
+          :aria-label="sidebarCollapsed ? t('展开对话侧边栏') : t('折叠对话侧边栏')"
           :aria-expanded="!sidebarCollapsed"
           aria-controls="conversation-sidebar"
-          :title="sidebarCollapsed ? '展开对话侧边栏' : '折叠对话侧边栏'"
+          :title="sidebarCollapsed ? t('展开对话侧边栏') : t('折叠对话侧边栏')"
           @click="toggleConversationSidebar"
         >
           <el-icon><Expand v-if="sidebarCollapsed" /><Fold v-else /></el-icon>
@@ -4944,31 +4946,29 @@ onBeforeUnmount(() => {
         <el-button
           class="new-chat-button"
           type="primary"
-          aria-label="新建对话"
-          :title="sidebarCollapsed ? '新建对话' : undefined"
+          :aria-label="t('新建对话')"
+          :title="sidebarCollapsed ? t('新建对话') : undefined"
           @click="createConversation"
         >
           <el-icon><Plus /></el-icon>
-          <span class="sidebar-button-label">新建对话</span>
+          <span class="sidebar-button-label">{{ t("新建对话") }}</span>
         </el-button>
 
         <div
           v-show="!sidebarCollapsed || sidebarOpen"
           class="conversation-section"
         >
-          <div class="section-label"><span>对话记录</span></div>
+          <div class="section-label"><span>{{ t("对话记录") }}</span></div>
           <el-input
             v-model="conversationSearch"
             class="conversation-search"
-            placeholder="搜索本地对话"
+            :placeholder="t('搜索本地对话')"
             clearable
-            aria-label="搜索本地对话"
+            :aria-label="t('搜索本地对话')"
           >
             <template #prefix><el-icon><Search /></el-icon></template>
           </el-input>
-          <div v-if="conversationItems.length === 0" class="conversation-empty">
-            没有匹配的本地对话
-          </div>
+          <div v-if="conversationItems.length === 0" class="conversation-empty"> {{ t("没有匹配的本地对话") }} </div>
           <Conversations
             v-model:active="activeConversation"
             :items="conversationItems"
@@ -4976,6 +4976,10 @@ onBeforeUnmount(() => {
             label-key="label"
             groupable
             :show-built-in-menu="true"
+            :menu="[
+              { key: 'rename', command: 'rename', label: t('重命名对话') },
+              { key: 'delete', command: 'delete', label: t('删除对话') },
+            ]"
             show-built-in-menu-type="hover"
             @change="handleConversationChange"
             @menu-command="handleConversationMenu"
@@ -4986,36 +4990,36 @@ onBeforeUnmount(() => {
           <button
             class="settings-entry"
             type="button"
-            aria-label="打开主机监控"
-            :title="sidebarCollapsed ? '主机监控' : undefined"
+            :aria-label="t('打开主机监控')"
+            :title="sidebarCollapsed ? t('主机监控') : undefined"
             @click="switchView('monitor')"
           >
             <el-icon><Monitor /></el-icon>
-            <span class="sidebar-button-label">主机监控</span>
+            <span class="sidebar-button-label">{{ t("主机监控") }}</span>
           </button>
           <button
             class="settings-entry"
             type="button"
-            aria-label="打开模型管理"
-            :title="sidebarCollapsed ? '模型管理' : undefined"
+            :aria-label="t('打开模型管理')"
+            :title="sidebarCollapsed ? t('模型管理') : undefined"
             @click="switchView('models')"
           >
             <el-icon><Cpu /></el-icon>
-            <span class="sidebar-button-label">模型管理</span>
+            <span class="sidebar-button-label">{{ t("模型管理") }}</span>
           </button>
           <button
             class="settings-entry"
             type="button"
-            aria-label="侧边栏设置"
-            :title="sidebarCollapsed ? '设置' : undefined"
+            :aria-label="t('侧边栏设置')"
+            :title="sidebarCollapsed ? t('设置') : undefined"
             @click="switchView('settings')"
           >
             <el-icon><Setting /></el-icon>
-            <span class="sidebar-button-label">设置</span>
+            <span class="sidebar-button-label">{{ t("设置") }}</span>
           </button>
           <div
             class="offline-seal"
-            :title="`${ollamaStateLabel} · 版本 ${ollamaVersion}`"
+            :title="t('{0} · 版本 {1}', [ollamaStateLabel, ollamaVersion])"
           >
             <span
               class="status-dot"
@@ -5029,7 +5033,7 @@ onBeforeUnmount(() => {
             ></span>
             <div class="sidebar-status-copy">
               <strong>{{ ollamaStateLabel }}</strong>
-              <span>版本 {{ ollamaVersion }}</span>
+              <span>{{ t("版本") }} {{ ollamaVersion }}</span>
             </div>
           </div>
         </div>
@@ -5039,7 +5043,7 @@ onBeforeUnmount(() => {
         v-if="sidebarOpen"
         class="sidebar-scrim"
         type="button"
-        aria-label="关闭导航"
+        :aria-label="t('关闭导航')"
         @click="sidebarOpen = false"
       ></button>
 
@@ -5049,7 +5053,7 @@ onBeforeUnmount(() => {
             <el-button
               class="mobile-menu"
               text
-              aria-label="打开导航"
+              :aria-label="t('打开导航')"
               @click="sidebarOpen = true"
             >
               <el-icon><Menu /></el-icon>
@@ -5063,8 +5067,8 @@ onBeforeUnmount(() => {
             <el-select
               v-model="currentModelId"
               class="model-select"
-              aria-label="选择当前模型"
-              placeholder="暂无可用模型"
+              :aria-label="t('选择当前模型')"
+              :placeholder="t('暂无可用模型')"
               :disabled="models.length === 0 || isGenerating"
             >
               <el-option
@@ -5074,45 +5078,37 @@ onBeforeUnmount(() => {
                 :value="model.id"
               />
             </el-select>
-            <el-tooltip content="设置" placement="bottom">
+            <el-tooltip :content="t('设置')" placement="bottom">
               <el-button
                 class="icon-button"
                 circle
-                aria-label="打开设置"
+                :aria-label="t('打开设置')"
                 @click="settingsDrawerOpen = true"
               >
                 <el-icon><Setting /></el-icon>
               </el-button>
             </el-tooltip>
             <el-dropdown trigger="click" @command="handleConversationAction">
-              <el-button class="icon-button" circle aria-label="更多操作">
+              <el-button class="icon-button" circle :aria-label="t('更多操作')">
                 <el-icon><MoreFilled /></el-icon>
               </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="rename">
-                    <el-icon><EditPen /></el-icon>
-                    重命名对话
-                  </el-dropdown-item>
+                    <el-icon><EditPen /></el-icon> {{ t("重命名对话") }} </el-dropdown-item>
                   <el-dropdown-item command="export">
-                    <el-icon><Files /></el-icon>
-                    导出对话
-                  </el-dropdown-item>
+                    <el-icon><Files /></el-icon> {{ t("导出对话") }} </el-dropdown-item>
                   <el-dropdown-item command="clear">
-                    <el-icon><RefreshRight /></el-icon>
-                    清空消息
-                  </el-dropdown-item>
+                    <el-icon><RefreshRight /></el-icon> {{ t("清空消息") }} </el-dropdown-item>
                   <el-dropdown-item command="delete" divided>
-                    <el-icon><Delete /></el-icon>
-                    删除对话
-                  </el-dropdown-item>
+                    <el-icon><Delete /></el-icon> {{ t("删除对话") }} </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
           </div>
         </header>
 
-        <section class="chat-workspace" aria-label="对话内容">
+        <section class="chat-workspace" :aria-label="t('对话内容')">
           <div
             v-if="messages.length"
             class="message-stage"
@@ -5129,9 +5125,9 @@ onBeforeUnmount(() => {
                 <div
                   class="message-avatar"
                   :class="{ 'is-user': item.role === 'user' }"
-                  :aria-label="item.role === 'user' ? '用户' : 'ShotAI'"
+                  :aria-label="item.role === 'user' ? t('用户') : 'ShotAI'"
                 >
-                  <span v-if="item.role === 'user'">你</span>
+                  <span v-if="item.role === 'user'">{{ t("你") }}</span>
                   <svg v-else viewBox="0 0 32 32" aria-hidden="true">
                     <path d="M4 24.5C12 23 20.5 17 27 5.5" />
                     <path d="m16.5 18.5 3.8-9 6.7-4-2.2 7.5-8.3 5.5Z" />
@@ -5141,7 +5137,7 @@ onBeforeUnmount(() => {
               </template>
               <template #header="{ item }">
                 <div class="message-author">
-                  {{ item.role === 'user' ? '你' : 'ShotAI' }}
+                  {{ item.role === 'user' ? t("你") : 'ShotAI' }}
                   <span v-if="item.role === 'assistant'">
                     · {{ item.modelName || selectedModel.name }}
                   </span>
@@ -5160,7 +5156,7 @@ onBeforeUnmount(() => {
                     <el-icon><MagicStick /></el-icon>
                   </div>
                   <div class="inline-image-generation-copy">
-                    <span>{{ item.generationStatus || '正在生成图片' }}</span>
+                    <span>{{ t(item.generationStatus || '正在生成图片') }}</span>
                     <strong>{{ item.generationProgress || 0 }}%</strong>
                   </div>
                   <div class="inline-image-progress" aria-hidden="true">
@@ -5170,12 +5166,10 @@ onBeforeUnmount(() => {
                       }"
                     ></span>
                   </div>
-                  <small>图片全程在运行 ShotAI 的电脑上生成</small>
+                  <small>{{ t("图片全程在运行 ShotAI 的电脑上生成") }}</small>
                 </div>
                 <div v-else class="typing-state" aria-live="polite">
-                  <span></span><span></span><span></span>
-                  正在准备回答
-                </div>
+                  <span></span><span></span><span></span> {{ t("正在准备回答") }} </div>
               </template>
               <template #content="{ item }">
                 <div
@@ -5186,7 +5180,7 @@ onBeforeUnmount(() => {
                     v-if="item.images?.length"
                     class="message-image-grid"
                     :class="`has-${Math.min(item.images.length, 4)}`"
-                    aria-label="消息图片"
+                    :aria-label="t('消息图片')"
                   >
                     <el-image
                       v-for="(image, imageIndex) in item.images"
@@ -5204,7 +5198,7 @@ onBeforeUnmount(() => {
                   <div
                     v-if="item.attachments?.length"
                     class="message-file-list"
-                    aria-label="消息文档附件"
+                    :aria-label="t('消息文档附件')"
                   >
                     <el-popover
                       v-for="attachment in item.attachments"
@@ -5223,21 +5217,16 @@ onBeforeUnmount(() => {
                             <small>
                               {{ attachment.extension }} ·
                               {{ formatFileSize(attachment.size) }} ·
-                              {{ attachment.characterCount.toLocaleString() }}
-                              字
-                            </small>
+                              {{ attachment.characterCount.toLocaleString() }} {{ t("字") }} </small>
                           </span>
-                          <span class="message-file-action">查看</span>
+                          <span class="message-file-action">{{ t("查看") }}</span>
                         </button>
                       </template>
                       <div class="attachment-preview">
                         <strong>{{ attachment.name }}</strong>
-                        <span>
-                          已提取
-                          {{ attachment.characterCount.toLocaleString() }}
-                          字{{
+                        <span> {{ t("已提取") }} {{ attachment.characterCount.toLocaleString() }} {{ t("字") }}{{
                             attachment.truncated
-                              ? '，内容较长，发送时会省略一部分'
+                              ? t("，内容较长，发送时会省略一部分")
                               : ''
                           }}
                         </span>
@@ -5248,7 +5237,7 @@ onBeforeUnmount(() => {
                   <div
                     v-if="item.artifacts?.length"
                     class="message-file-list message-artifact-list"
-                    aria-label="可下载文件"
+                    :aria-label="t('可下载文件')"
                   >
                     <button
                       v-for="artifact in item.artifacts"
@@ -5268,9 +5257,7 @@ onBeforeUnmount(() => {
                         </small>
                       </span>
                       <span class="message-file-action">
-                        <el-icon><Download /></el-icon>
-                        下载
-                      </span>
+                        <el-icon><Download /></el-icon> {{ t("下载") }} </span>
                     </button>
                   </div>
                   <Thinking
@@ -5290,24 +5277,21 @@ onBeforeUnmount(() => {
                     ></div>
                   </div>
                   <div v-if="item.truncated" class="response-limit-note">
-                    <span>这次回答已经到达长度上限。</span>
+                    <span>{{ t("这次回答已经到达长度上限。") }}</span>
                     <el-button
                       text
                       size="small"
                       :disabled="isGenerating"
                       @click="continueResponse"
-                    >
-                      继续回答
-                    </el-button>
+                    > {{ t("继续回答") }} </el-button>
                   </div>
                   <div
                     v-if="item.sources?.length"
                     class="message-sources"
-                    aria-label="回答参考的资料"
+                    :aria-label="t('回答参考的资料')"
                   >
                     <div class="source-heading">
-                      <el-icon><Files /></el-icon>
-                      参考资料 · {{ item.sources.length }}
+                      <el-icon><Files /></el-icon> {{ t("参考资料 ·") }} {{ item.sources.length }}
                     </div>
                     <div class="source-list">
                       <el-popover
@@ -5325,12 +5309,10 @@ onBeforeUnmount(() => {
                         </template>
                         <div class="source-popover">
                           <strong>{{ source.documentName }}</strong>
-                          <span>
-                            第 {{ source.chunkIndex + 1 }} 段 ·
-                            {{
+                          <span> {{ t("第") }} {{ source.chunkIndex + 1 }} {{ t("段 ·") }} {{
                               source.mode === 'vector'
-                                ? '智能找到'
-                                : '文字找到'
+                                ? t("智能找到")
+                                : t("文字找到")
                             }}
                             · {{ Math.round(source.score * 100) }}%
                           </span>
@@ -5344,51 +5326,41 @@ onBeforeUnmount(() => {
               <template #footer="{ item }">
                 <div class="message-footer">
                   <span>{{ item.time }}</span>
-                  <span v-if="item.stopped" class="message-status">
-                    已由用户停止
-                  </span>
+                  <span v-if="item.stopped" class="message-status"> {{ t("已由用户停止") }} </span>
                   <template v-if="item.role === 'user'">
                     <el-button
                       text
                       size="small"
-                      aria-label="复制问题"
+                      :aria-label="t('复制问题')"
                       @click="copyMessage(item.content)"
                     >
-                      <el-icon><CopyDocument /></el-icon>
-                      复制
-                    </el-button>
+                      <el-icon><CopyDocument /></el-icon> {{ t("复制") }} </el-button>
                     <el-button
                       text
                       size="small"
                       :disabled="isGenerating"
-                      aria-label="编辑问题并重新生成"
+                      :aria-label="t('编辑问题并重新生成')"
                       @click="editUserMessage(item)"
                     >
-                      <el-icon><EditPen /></el-icon>
-                      编辑
-                    </el-button>
+                      <el-icon><EditPen /></el-icon> {{ t("编辑") }} </el-button>
                   </template>
                   <template v-if="item.role === 'assistant' && item.content">
                     <el-button
                       v-if="item.generationType === 'image' && item.images?.[0]"
                       text
                       size="small"
-                      aria-label="保存生成的图片"
+                      :aria-label="t('保存生成的图片')"
                       @click="downloadMessageImage(item.images[0])"
                     >
-                      <el-icon><Download /></el-icon>
-                      保存图片
-                    </el-button>
+                      <el-icon><Download /></el-icon> {{ t("保存图片") }} </el-button>
                     <el-button
                       v-if="item.generationType !== 'image'"
                       text
                       size="small"
-                      aria-label="复制回答"
+                      :aria-label="t('复制回答')"
                       @click="copyMessage(item.content)"
                     >
-                      <el-icon><CopyDocument /></el-icon>
-                      复制
-                    </el-button>
+                      <el-icon><CopyDocument /></el-icon> {{ t("复制") }} </el-button>
                     <el-button
                       v-if="
                         item.generationType !== 'image' &&
@@ -5400,9 +5372,7 @@ onBeforeUnmount(() => {
                       :disabled="isGenerating"
                       @click="regenerateLast"
                     >
-                      <el-icon><RefreshRight /></el-icon>
-                      重新生成
-                    </el-button>
+                      <el-icon><RefreshRight /></el-icon> {{ t("重新生成") }} </el-button>
                   </template>
                 </div>
               </template>
@@ -5412,7 +5382,7 @@ onBeforeUnmount(() => {
           <section
             v-else-if="!ollamaConnected || !models.length"
             class="empty-chat-state setup-empty-state"
-            aria-label="完成首次准备"
+            :aria-label="t('完成首次准备')"
           >
             <div class="empty-chat-mark" aria-hidden="true">
               <el-icon><Cpu /></el-icon>
@@ -5420,15 +5390,15 @@ onBeforeUnmount(() => {
             <h2>
               {{
                 ollamaConnected
-                  ? '添加一个模型即可开始'
-                  : '完成准备后即可开始'
+                  ? t("添加一个模型即可开始")
+                  : t("完成准备后即可开始")
               }}
             </h2>
             <p>
               {{
                 ollamaConnected
-                  ? '选择已经下载好的模型文件，系统会自动检查并安装。'
-                  : '打开运行检查，系统会告诉你还缺少什么。'
+                  ? t("选择已经下载好的模型文件，系统会自动检查并安装。")
+                  : t("打开运行检查，系统会告诉你还缺少什么。")
               }}
             </p>
             <el-button
@@ -5441,12 +5411,12 @@ onBeforeUnmount(() => {
               "
             >
               <el-icon><ArrowRight /></el-icon>
-              {{ ollamaConnected ? '添加模型' : '打开运行检查' }}
+              {{ ollamaConnected ? t("添加模型") : t("打开运行检查") }}
             </el-button>
-            <small>准备完成后，这个引导会自动消失。</small>
+            <small>{{ t("准备完成后，这个引导会自动消失。") }}</small>
           </section>
 
-          <section v-else class="empty-chat-state" aria-label="开始新对话">
+          <section v-else class="empty-chat-state" :aria-label="t('开始新对话')">
             <div class="empty-chat-mark" aria-hidden="true">
               <svg viewBox="0 0 32 32">
                 <path d="M4 24.5C12 23 20.5 17 27 5.5" />
@@ -5454,12 +5424,12 @@ onBeforeUnmount(() => {
                 <path d="M8 26h17" />
               </svg>
             </div>
-            <h2>有什么可以帮你？</h2>
+            <h2>{{ t("有什么可以帮你？") }}</h2>
             <p>
               {{
                 models.length
-                  ? `正在使用 ${selectedModel.name}`
-                  : '启动 AI 服务并选择一个模型后即可开始'
+                  ? t("正在使用 {0}", [selectedModel.name])
+                  : t("启动 AI 服务并选择一个模型后即可开始")
               }}
             </p>
             <div class="empty-prompt-list">
@@ -5469,7 +5439,7 @@ onBeforeUnmount(() => {
                 type="button"
                 @click="useQuickPrompt(prompt)"
               >
-                {{ prompt }}
+                {{ t(prompt) }}
               </button>
             </div>
           </section>
@@ -5498,13 +5468,13 @@ onBeforeUnmount(() => {
             <div v-if="attachmentDragActive" class="image-drop-overlay">
               <el-icon><Paperclip /></el-icon>
               <strong>
-                {{ composerMode === 'image' ? '松开即可设为参考图' : '松开鼠标即可添加' }}
+                {{ composerMode === 'image' ? t("松开即可设为参考图") : t("松开鼠标即可添加") }}
               </strong>
               <span>
                 {{
                   composerMode === 'image'
-                    ? '支持 JPG、PNG 和 WebP，一次使用一张'
-                    : '支持常见图片、文本、PDF、Word 和 Excel 文件'
+                    ? t("支持 JPG、PNG 和 WebP，一次使用一张")
+                    : t("支持常见图片、文本、PDF、Word 和 Excel 文件")
                 }}
               </span>
             </div>
@@ -5520,22 +5490,18 @@ onBeforeUnmount(() => {
             >
               <div class="attachment-tray-heading">
                 <span>
-                  <el-icon><Paperclip /></el-icon>
-                  已添加
-                  {{ pendingImages.length + pendingAttachments.length }}
-                  个文件
-                </span>
+                  <el-icon><Paperclip /></el-icon> {{ t("已添加") }} {{ pendingImages.length + pendingAttachments.length }} {{ t("个文件") }} </span>
                 <small>
                   {{
                     attachmentProcessing
-                      ? '正在读取文件'
+                      ? t("正在读取文件")
                       : pendingImages.length
                         ? selectedModelSupportsVision
-                          ? '可以识别图片'
+                          ? t("可以识别图片")
                           : preferredVisionModel
-                            ? `将自动使用 ${preferredVisionModel.name}`
-                            : '还没有可以识别图片的模型'
-                        : '文件可以发送'
+                            ? t("将自动使用 {0}", [preferredVisionModel.name])
+                            : t("还没有可以识别图片的模型")
+                        : t("文件可以发送")
                   }}
                 </small>
               </div>
@@ -5561,7 +5527,7 @@ onBeforeUnmount(() => {
                   </figcaption>
                   <button
                     type="button"
-                    :aria-label="`移除 ${image.name}`"
+                    :aria-label="t('移除 {0}', [image.name])"
                     @click="removePendingImage(image.id)"
                   >
                     <el-icon><CloseBold /></el-icon>
@@ -5573,9 +5539,7 @@ onBeforeUnmount(() => {
                   v-if="attachmentProcessing"
                   class="image-processing-card"
                 >
-                  <span></span>
-                  正在读取
-                </div>
+                  <span></span> {{ t("正在读取") }} </div>
               </div>
               <div
                 v-if="
@@ -5584,35 +5548,31 @@ onBeforeUnmount(() => {
                   preferredVisionModel
                 "
                 class="vision-auto-route"
-              >
-                本次将自动使用 {{ preferredVisionModel.name }} 识别图片，不会更改当前聊天模型。
-              </div>
+              > {{ t("本次将自动使用") }} {{ preferredVisionModel.name }} {{ t("识别图片，不会更改当前聊天模型。") }} </div>
               <div
                 v-else-if="pendingImages.length && !preferredVisionModel"
                 class="vision-model-warning"
-              >
-                还没有可以识别图片的模型，请先添加一个再发送。
-              </div>
+              > {{ t("还没有可以识别图片的模型，请先添加一个再发送。") }} </div>
             </div>
             <div
               v-if="composerMode === 'image'"
               class="composer-mode-strip"
-              aria-label="图片创作模式"
+              :aria-label="t('图片创作模式')"
             >
               <div class="composer-mode-title">
                 <span><el-icon><MagicStick /></el-icon></span>
                 <div>
-                  <strong>图片创作</strong>
+                  <strong>{{ t("图片创作") }}</strong>
                   <small>
                     {{
                       pendingImages.length
-                        ? `参考图修改 · ${selectedImageProvider?.label}`
-                        : `文字生成 · ${selectedImageProvider?.label}`
+                        ? t("参考图修改 · {0}", [selectedImageProvider?.label])
+                        : t("文字生成 · {0}", [selectedImageProvider?.label])
                     }}
                   </small>
                 </div>
               </div>
-              <div class="composer-canvas-options" aria-label="图片形状">
+              <div class="composer-canvas-options" :aria-label="t('图片形状')">
                 <button
                   v-for="option in imageCanvasOptions"
                   :key="option.id"
@@ -5622,13 +5582,13 @@ onBeforeUnmount(() => {
                   :disabled="isGenerating"
                   @click="imageCanvas = option.id"
                 >
-                  {{ option.label }}
+                  {{ t(option.label) }}
                 </button>
               </div>
               <button
                 class="composer-mode-close"
                 type="button"
-                aria-label="退出图片创作模式"
+                :aria-label="t('退出图片创作模式')"
                 :disabled="isGenerating"
                 @click="leaveImageComposer"
               >
@@ -5637,26 +5597,23 @@ onBeforeUnmount(() => {
               <div
                 v-if="pendingImages[0]"
                 class="composer-reference-editor"
-                aria-label="图片修改设置"
+                :aria-label="t('图片修改设置')"
               >
                 <el-image
                   class="composer-reference-image"
                   :src="pendingImages[0].dataUrl"
-                  :alt="`参考图：${pendingImages[0].name}`"
+                  :alt="t('参考图：{0}', [pendingImages[0].name])"
                   :preview-src-list="[pendingImages[0].dataUrl]"
                   preview-teleported
                   fit="cover"
                 />
                 <div class="composer-reference-copy">
-                  <strong>参考图</strong>
+                  <strong>{{ t("参考图") }}</strong>
                   <small>
-                    {{ pendingImages[0].width }}×{{ pendingImages[0].height }} · 修改后仍保留原图
-                  </small>
+                    {{ pendingImages[0].width }}×{{ pendingImages[0].height }} {{ t("· 修改后仍保留原图") }} </small>
                 </div>
                 <label class="composer-strength-control">
-                  <span>
-                    改动幅度
-                    <strong>{{ Math.round(imageEditStrength * 100) }}%</strong>
+                  <span> {{ t("改动幅度") }} <strong>{{ Math.round(imageEditStrength * 100) }}%</strong>
                   </span>
                   <input
                     v-model.number="imageEditStrength"
@@ -5665,15 +5622,15 @@ onBeforeUnmount(() => {
                     max="0.95"
                     step="0.05"
                     :disabled="isGenerating"
-                    aria-label="图片改动幅度"
+                    :aria-label="t('图片改动幅度')"
                   />
-                  <small><span>更像原图</span><span>变化更多</span></small>
+                  <small><span>{{ t("更像原图") }}</span><span>{{ t("变化更多") }}</span></small>
                 </label>
                 <button
                   class="composer-reference-remove"
                   type="button"
                   :disabled="isGenerating"
-                  :aria-label="`移除参考图 ${pendingImages[0].name}`"
+                  :aria-label="t('移除参考图 {0}', [pendingImages[0].name])"
                   @click="removePendingImage(pendingImages[0].id)"
                 >
                   <el-icon><Delete /></el-icon>
@@ -5686,9 +5643,7 @@ onBeforeUnmount(() => {
                 :disabled="isGenerating || attachmentProcessing"
                 @click="openAttachmentPicker"
               >
-                <el-icon><Picture /></el-icon>
-                添加参考图进行修改
-              </button>
+                <el-icon><Picture /></el-icon> {{ t("添加参考图进行修改") }} </button>
             </div>
             <div
               v-else-if="senderText.trim() && composerImageIntent !== 'chat'"
@@ -5712,8 +5667,8 @@ onBeforeUnmount(() => {
                 <small>
                   {{
                     composerImageIntent === 'edit'
-                      ? '发送后会保留未要求改变的内容，并基于上下文继续修改'
-                      : '发送后会直接调用本地图片模型，不会占用聊天模型'
+                      ? t("发送后会保留未要求改变的内容，并基于上下文继续修改")
+                      : t("发送后会直接调用本地图片模型，不会占用聊天模型")
                   }}
                 </small>
               </div>
@@ -5728,7 +5683,7 @@ onBeforeUnmount(() => {
                   <button
                     class="composer-tool-button"
                     type="button"
-                    aria-label="添加文件或使用我的资料"
+                    :aria-label="t('添加文件或使用我的资料')"
                     :disabled="isGenerating || attachmentProcessing"
                   >
                     <el-icon><Plus /></el-icon>
@@ -5743,20 +5698,14 @@ onBeforeUnmount(() => {
                         "
                       >
                         <el-icon><Paperclip /></el-icon>
-                        {{ composerMode === 'image' ? '添加参考图' : '上传图片或文档' }}
+                        {{ composerMode === 'image' ? t("添加参考图") : t("上传图片或文档") }}
                       </el-dropdown-item>
                       <el-dropdown-item command="knowledge">
-                        <el-icon><FolderOpened /></el-icon>
-                        选择我的资料
-                      </el-dropdown-item>
+                        <el-icon><FolderOpened /></el-icon> {{ t("选择我的资料") }} </el-dropdown-item>
                       <el-dropdown-item command="image-generation">
-                        <el-icon><MagicStick /></el-icon>
-                        创作图片
-                      </el-dropdown-item>
+                        <el-icon><MagicStick /></el-icon> {{ t("创作图片") }} </el-dropdown-item>
                       <el-dropdown-item command="models" divided>
-                        <el-icon><DataAnalysis /></el-icon>
-                        管理 AI 模型
-                      </el-dropdown-item>
+                        <el-icon><DataAnalysis /></el-icon> {{ t("管理 AI 模型") }} </el-dropdown-item>
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
@@ -5767,13 +5716,13 @@ onBeforeUnmount(() => {
                 class="composer-textarea"
                 rows="1"
                 maxlength="8000"
-                :aria-label="composerMode === 'image' ? '描述想要的画面' : '输入问题'"
+                :aria-label="composerMode === 'image' ? t('描述想要的画面') : t('输入问题')"
                 :placeholder="
                   composerMode === 'image'
                     ? pendingImages.length
-                      ? '描述想怎样修改这张图，按 Enter 开始'
-                      : '描述想要的画面，按 Enter 开始生成'
-                    : '输入问题，或上传文件后描述分析、修改和输出要求'
+                      ? t('描述想怎样修改这张图，按 Enter 开始')
+                      : t('描述想要的画面，按 Enter 开始生成')
+                    : t('输入问题，或上传文件后描述分析、修改和输出要求')
                 "
                 @input="resizeComposer"
                 @keydown="handleComposerKeydown"
@@ -5784,15 +5733,15 @@ onBeforeUnmount(() => {
                   :content="
                     isGenerating
                       ? isStopping
-                        ? '正在停止生成'
-                        : '停止生成（Esc）'
+                        ? t('正在停止生成')
+                        : t('停止生成（Esc）')
                       : composerMode === 'image'
-                        ? '生成图片（Enter）'
+                        ? t('生成图片（Enter）')
                         : composerImageIntent === 'edit'
-                          ? '继续修改图片（Enter）'
+                          ? t('继续修改图片（Enter）')
                           : composerImageIntent === 'generate'
-                            ? '生成图片（Enter）'
-                        : '发送消息（Enter）'
+                            ? t('生成图片（Enter）')
+                        : t('发送消息（Enter）')
                   "
                   placement="top"
                 >
@@ -5800,7 +5749,7 @@ onBeforeUnmount(() => {
                     class="composer-action-button"
                     :class="{ 'is-stop': isGenerating }"
                     type="button"
-                    :aria-label="isGenerating ? '停止生成' : '发送消息'"
+                    :aria-label="isGenerating ? t('停止生成') : t('发送消息')"
                     :disabled="attachmentProcessing || isStopping"
                     @click="isGenerating ? stopGeneration() : handleSubmit()"
                   >
@@ -5816,16 +5765,16 @@ onBeforeUnmount(() => {
                   <span class="generation-pulse"></span>
                   {{
                     isStopping
-                      ? '取消中 · 正在结束本次请求'
+                      ? t("取消中 · 正在结束本次请求")
                       : composerMode === 'image'
-                        ? '正在生成图片 · ESC 可停止'
-                        : `${messages[messages.length - 1]?.generationStatus || '正在生成'} · ESC 可停止`
+                        ? t("正在生成图片 · ESC 可停止")
+                        : t("{0} · ESC 可停止", [t(messages[messages.length - 1]?.generationStatus || '正在生成')])
                   }}
                 </template>
                 <template v-else>
                   {{
                     composerMode === 'image'
-                      ? '图片将在本地生成'
+                      ? t("图片将在本地生成")
                       : persistenceLabel
                   }}
                 </template>
@@ -5839,7 +5788,7 @@ onBeforeUnmount(() => {
       <el-drawer
         v-model="imageStudioOpen"
         class="product-drawer image-studio-drawer"
-        title="图片创作"
+        :title="t('图片创作')"
         size="min(760px, 96vw)"
         append-to-body
         :close-on-click-modal="!imageGenerating"
@@ -5847,8 +5796,8 @@ onBeforeUnmount(() => {
         <template #header>
           <div class="drawer-heading">
             <div>
-              <h2>图片创作</h2>
-              <p>描述想要的画面，由这台电脑在本地生成</p>
+              <h2>{{ t("图片创作") }}</h2>
+              <p>{{ t("描述想要的画面，由这台电脑在本地生成") }}</p>
             </div>
             <el-tag
               :type="imageProviderOptions.length ? 'success' : 'warning'"
@@ -5856,8 +5805,8 @@ onBeforeUnmount(() => {
             >
               {{
                 imageProviderOptions.length
-                  ? '图片模型已就绪'
-                  : '等待准备图片组件'
+                  ? t("图片模型已就绪")
+                  : t("等待准备图片组件")
               }}
             </el-tag>
           </div>
@@ -5871,11 +5820,9 @@ onBeforeUnmount(() => {
             <div class="image-model-install-icon">
               <el-icon><Picture /></el-icon>
             </div>
-            <span>{{ hostPlatformLabel }} 本地图片创作</span>
-            <h3>添加完整模型后即可使用</h3>
-            <p>
-              直接点击“添加模型”并选择下载页中的全部文件。系统会自动识别、组合并复用已有文件。
-            </p>
+            <span>{{ hostPlatformLabel }} {{ t("本地图片创作") }}</span>
+            <h3>{{ t("添加完整模型后即可使用") }}</h3>
+            <p> {{ t("直接点击“添加模型”并选择下载页中的全部文件。系统会自动识别、组合并复用已有文件。") }} </p>
 
             <div class="image-setup-checks">
               <div :class="{ 'is-ready': imageRuntime.runtimeFound }">
@@ -5884,12 +5831,12 @@ onBeforeUnmount(() => {
                   <Download v-else />
                 </el-icon>
                 <span>
-                  <strong>图片运行组件</strong>
+                  <strong>{{ t("图片运行组件") }}</strong>
                   <small>
                     {{
                       imageRuntime.runtimeFound
-                        ? '已经找到'
-                        : '当前发布包缺少图片组件'
+                        ? t("已经找到")
+                        : t("当前发布包缺少图片组件")
                     }}
                   </small>
                 </span>
@@ -5900,14 +5847,14 @@ onBeforeUnmount(() => {
                   <FolderOpened v-else />
                 </el-icon>
                 <span>
-                  <strong>图片模型文件</strong>
+                  <strong>{{ t("图片模型文件") }}</strong>
                   <small>
                     {{
                       imageRuntime.modelConfigured
-                        ? `已经找到 ${imageRuntime.modelFiles.length} 个文件`
+                        ? t("已经找到 {0} 个文件", [imageRuntime.modelFiles.length])
                         : imageRuntime.missingFiles?.length
-                          ? `还缺少：${imageRuntime.missingFiles.join('、')}`
-                          : '尚未添加完整模型'
+                          ? t("还缺少：{0}", [imageRuntime.missingFiles.join('、')])
+                          : t("尚未添加完整模型")
                     }}
                   </small>
                 </span>
@@ -5921,23 +5868,19 @@ onBeforeUnmount(() => {
                 :loading="imageModelImporting"
                 @click="openImageModelPicker"
               >
-                <el-icon><FolderOpened /></el-icon>
-                添加模型
-              </el-button>
+                <el-icon><FolderOpened /></el-icon> {{ t("添加模型") }} </el-button>
               <el-button
                 :loading="imageRuntimeChecking"
                 @click="refreshImageRuntime({ announce: true })"
               >
-                <el-icon><RefreshRight /></el-icon>
-                重新检查
-              </el-button>
+                <el-icon><RefreshRight /></el-icon> {{ t("重新检查") }} </el-button>
             </div>
 
             <div v-if="!systemInfo.canManage" class="host-managed-note compact">
               <el-icon><Lock /></el-icon>
               <div>
-                <strong>请在主机上添加图片模型</strong>
-                <span>模型准备完成后，这台电脑会自动识别并直接使用。</span>
+                <strong>{{ t("请在主机上添加图片模型") }}</strong>
+                <span>{{ t("模型准备完成后，这台电脑会自动识别并直接使用。") }}</span>
               </div>
             </div>
 
@@ -5946,7 +5889,7 @@ onBeforeUnmount(() => {
               class="image-model-import-progress"
             >
               <div>
-                <span>{{ imageModelImportStatus }}</span>
+                <span>{{ t(imageModelImportStatus) }}</span>
                 <strong>{{ imageModelImportProgress }}%</strong>
               </div>
               <el-progress
@@ -5957,17 +5900,15 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="image-platform-note">
-              <strong>系统会自动判断</strong>
-              <span>
-                聊天、看图、资料查找和图片创作共用同一个添加入口。FLUX.2 通常需要同一下载页中的 3 个文件。
-              </span>
+              <strong>{{ t("系统会自动判断") }}</strong>
+              <span> {{ t("聊天、看图、资料查找和图片创作共用同一个添加入口。FLUX.2 通常需要同一下载页中的 3 个文件。") }} </span>
             </div>
             <div
               v-if="imageRuntime.runtimeError"
               class="vision-model-warning"
               role="alert"
             >
-              {{ imageRuntime.runtimeError }}
+              {{ t(imageRuntime.runtimeError || '') }}
             </div>
           </section>
 
@@ -5976,12 +5917,12 @@ onBeforeUnmount(() => {
               <div class="image-auto-route" aria-live="polite">
                 <span class="image-auto-route-dot"></span>
                 <div>
-                  <strong>自动使用 {{ selectedImageProvider?.label }}</strong>
-                  <small>只负责生成图片，不会更改聊天模型</small>
+                  <strong>{{ t("自动使用") }} {{ selectedImageProvider?.label }}</strong>
+                  <small>{{ t("只负责生成图片，不会更改聊天模型") }}</small>
                 </div>
               </div>
 
-              <label for="image-prompt">想要什么样的画面</label>
+              <label for="image-prompt">{{ t("想要什么样的画面") }}</label>
               <el-input
                 id="image-prompt"
                 v-model="imagePrompt"
@@ -5991,12 +5932,12 @@ onBeforeUnmount(() => {
                 show-word-limit
                 resize="vertical"
                 :disabled="imageGenerating"
-                placeholder="例如：一枚银色航天器停在火星基地，清晨阳光，电影感，画面中不要出现文字"
+                :placeholder="t('例如：一枚银色航天器停在火星基地，清晨阳光，电影感，画面中不要出现文字')"
               />
 
               <div class="image-canvas-heading">
-                <span>图片形状</span>
-                <small>正方形最适合第一次测试</small>
+                <span>{{ t("图片形状") }}</span>
+                <small>{{ t("正方形最适合第一次测试") }}</small>
               </div>
               <div class="image-canvas-options">
                 <button
@@ -6011,34 +5952,34 @@ onBeforeUnmount(() => {
                     class="image-canvas-shape"
                     :class="`is-${option.id}`"
                   ></span>
-                  <strong>{{ option.label }}</strong>
+                  <strong>{{ t(option.label) }}</strong>
                   <small>{{ option.detail }}</small>
                 </button>
               </div>
 
               <div class="image-platform-note compact">
-                <strong>试用功能</strong>
+                <strong>{{ t("试用功能") }}</strong>
                 <span>
                   {{
                     selectedImageProvider?.kind === 'local-runtime'
-                      ? `${hostPlatformLabel} 图片组件已连接。首次运行需要载入模型，可能等待几十秒。`
-                      : '当前使用 Ollama 图片模型；图片仍只在本地生成。'
+                      ? t("{0} 图片组件已连接。首次运行需要载入模型，可能等待几十秒。", [hostPlatformLabel])
+                      : t("当前使用 Ollama 图片模型；图片仍只在本地生成。")
                   }}
                 </span>
               </div>
 
               <details class="image-model-more">
-                <summary>更多设置</summary>
+                <summary>{{ t("更多设置") }}</summary>
                 <div class="image-model-more-content">
-                  <label for="image-model">图片模型</label>
+                  <label for="image-model">{{ t("图片模型") }}</label>
                   <el-select
                     id="image-model"
                     v-model="imageModelId"
                     :disabled="imageGenerating"
-                    placeholder="自动选择"
+                    :placeholder="t('自动选择')"
                   >
                     <el-option
-                      label="自动选择（推荐）"
+                      :label="t('自动选择（推荐）')"
                       :value="AUTO_IMAGE_PROVIDER_ID"
                     />
                     <el-option
@@ -6048,23 +5989,21 @@ onBeforeUnmount(() => {
                       :value="provider.id"
                     />
                   </el-select>
-                  <small>只有需要固定使用某个图片模型时才需要更改。</small>
+                  <small>{{ t("只有需要固定使用某个图片模型时才需要更改。") }}</small>
 
                   <div class="image-model-management-shortcut">
                     <span>
-                      <strong>模型文件统一管理</strong>
-                      <small>添加、删除和检查图片模型请前往模型管理</small>
+                      <strong>{{ t("模型文件统一管理") }}</strong>
+                      <small>{{ t("添加、删除和检查图片模型请前往模型管理") }}</small>
                     </span>
-                    <el-button @click="openUnifiedModelManagement">
-                      打开模型管理
-                    </el-button>
+                    <el-button @click="openUnifiedModelManagement"> {{ t("打开模型管理") }} </el-button>
                   </div>
                 </div>
               </details>
 
               <div v-if="imageStatus" class="image-generation-state">
                 <div>
-                  <span>{{ imageStatus }}</span>
+                  <span>{{ t(imageStatus) }}</span>
                   <strong v-if="imageGenerating">{{ imageProgress }}%</strong>
                 </div>
                 <el-progress
@@ -6081,18 +6020,14 @@ onBeforeUnmount(() => {
                   class="image-stop-button"
                   @click="stopImageCreation"
                 >
-                  <span class="stop-square"></span>
-                  停止
-                </el-button>
+                  <span class="stop-square"></span> {{ t("停止") }} </el-button>
                 <el-button
                   v-else
                   type="primary"
                   :disabled="!imagePrompt.trim() || !selectedImageProvider"
                   @click="createImage"
                 >
-                  <el-icon><MagicStick /></el-icon>
-                  开始生成
-                </el-button>
+                  <el-icon><MagicStick /></el-icon> {{ t("开始生成") }} </el-button>
               </div>
             </section>
 
@@ -6102,13 +6037,11 @@ onBeforeUnmount(() => {
             >
               <div class="generated-image-heading">
                 <div>
-                  <span>生成结果</span>
+                  <span>{{ t("生成结果") }}</span>
                   <strong>{{ generatedImageModel }}</strong>
                 </div>
                 <el-button @click="downloadGeneratedImage">
-                  <el-icon><Download /></el-icon>
-                  保存图片
-                </el-button>
+                  <el-icon><Download /></el-icon> {{ t("保存图片") }} </el-button>
               </div>
               <el-image
                 class="generated-image"
@@ -6123,12 +6056,10 @@ onBeforeUnmount(() => {
             <section v-if="imageHistory.length" class="image-history-section">
               <div class="image-history-heading">
                 <div>
-                  <span>本地记录</span>
-                  <strong>最近生成的图片</strong>
+                  <span>{{ t("本地记录") }}</span>
+                  <strong>{{ t("最近生成的图片") }}</strong>
                 </div>
-                <el-button text size="small" @click="clearGeneratedImageHistory">
-                  清空记录
-                </el-button>
+                <el-button text size="small" @click="clearGeneratedImageHistory"> {{ t("清空记录") }} </el-button>
               </div>
               <div class="image-history-grid">
                 <article v-for="item in imageHistory" :key="item.id">
@@ -6140,7 +6071,7 @@ onBeforeUnmount(() => {
                   <button
                     class="image-history-delete"
                     type="button"
-                    :aria-label="`删除图片记录 ${item.prompt}`"
+                    :aria-label="t('删除图片记录 {0}', [item.prompt])"
                     @click="removeImageHistoryItem(item.id)"
                   >
                     <el-icon><CloseBold /></el-icon>
@@ -6155,24 +6086,22 @@ onBeforeUnmount(() => {
       <el-drawer
         v-model="modelDrawerOpen"
         class="product-drawer unified-model-drawer"
-        title="模型管理"
+        :title="t('模型管理')"
         size="min(820px, 94vw)"
         append-to-body
       >
         <template #header>
           <div class="drawer-heading">
             <div>
-              <h2>模型管理</h2>
-              <p>查看、添加和选择这台电脑上的 AI 模型</p>
+              <h2>{{ t("模型管理") }}</h2>
+              <p>{{ t("查看、添加和选择这台电脑上的 AI 模型") }}</p>
             </div>
             <div class="drawer-actions">
               <el-button
                 :loading="ollamaRefreshing"
                 @click="refreshOllama({ announce: true })"
               >
-                <el-icon><RefreshRight /></el-icon>
-                刷新
-              </el-button>
+                <el-icon><RefreshRight /></el-icon> {{ t("刷新") }} </el-button>
               <el-button
                 v-if="systemInfo.canManage"
                 type="danger"
@@ -6180,17 +6109,13 @@ onBeforeUnmount(() => {
                 :loading="allModelsRemoving"
                 :disabled="isGenerating"
                 @click="removeAllConversationModels"
-              >
-                完整清理对话模型
-              </el-button>
+              > {{ t("完整清理对话模型") }} </el-button>
               <el-button
                 v-if="systemInfo.canManage"
                 type="primary"
                 @click="openImportDialog"
               >
-                <el-icon><DocumentAdd /></el-icon>
-                添加模型
-              </el-button>
+                <el-icon><DocumentAdd /></el-icon> {{ t("添加模型") }} </el-button>
             </div>
           </div>
         </template>
@@ -6199,9 +6124,9 @@ onBeforeUnmount(() => {
           <div class="storage-summary">
             <div class="storage-icon"><el-icon><Files /></el-icon></div>
             <div class="storage-copy">
-              <strong>统一模型中心</strong>
+              <strong>{{ t("统一模型中心") }}</strong>
               <span>
-                {{ managedModelCount }} 组可用模型 · 对话模型占用 {{ totalModelSize }}
+                {{ managedModelCount }} {{ t("组可用模型 · 对话模型占用") }} {{ totalModelSize }}
               </span>
             </div>
             <el-progress
@@ -6209,20 +6134,16 @@ onBeforeUnmount(() => {
               :status="ollamaConnected ? 'success' : 'exception'"
               :show-text="false"
             />
-            <span class="storage-free">版本 {{ ollamaVersion }}</span>
+            <span class="storage-free">{{ t("版本") }} {{ ollamaVersion }}</span>
           </div>
 
           <div v-if="systemInfo.canManage" class="host-managed-note compact">
             <el-icon><Cpu /></el-icon>
             <div>
               <strong>{{ ollamaRuntimeLabel }}</strong>
-              <span v-if="systemInfo.ollama.isolated">
-                模型只从 {{ systemInfo.ollama.modelDirectory }} 读取；即使系统中还有另一个 AI 服务，也不会混用它的模型。
-              </span>
-              <span v-else>
-                当前模型由 {{ systemInfo.ollama.endpoint }} 提供，模型列表可能来自外部 AI 服务。
-              </span>
-              <span>升级或重新安装会保留模型；如需全新状态，请使用上方“清空模型”。</span>
+              <span v-if="systemInfo.ollama.isolated"> {{ t("模型只从") }} {{ systemInfo.ollama.modelDirectory }} {{ t("读取；即使系统中还有另一个 AI 服务，也不会混用它的模型。") }} </span>
+              <span v-else> {{ t("当前模型由") }} {{ systemInfo.ollama.endpoint }} {{ t("提供，模型列表可能来自外部 AI 服务。") }} </span>
+              <span>{{ t("升级或重新安装会保留模型；如需全新状态，请使用上方“清空模型”。") }}</span>
             </div>
           </div>
 
@@ -6242,9 +6163,7 @@ onBeforeUnmount(() => {
                 {{
                   section.models.length +
                   (section.key === 'image' && imageRuntime.modelFiles.length ? 1 : 0)
-                }}
-                组
-              </span>
+                }} {{ t("组") }} </span>
             </div>
 
             <div class="model-list managed-model-list">
@@ -6255,7 +6174,7 @@ onBeforeUnmount(() => {
                   'is-current': selectedImageProvider?.id === 'local-runtime',
                 }"
               >
-                <div class="model-symbol">图</div>
+                <div class="model-symbol">{{ t("图") }}</div>
                 <div class="model-details">
                   <div class="model-title-line">
                     <h3>{{ imageRuntime.modelLabel }}</h3>
@@ -6264,13 +6183,13 @@ onBeforeUnmount(() => {
                       effect="plain"
                       size="small"
                     >
-                      {{ imageRuntime.serviceOnline ? '已载入' : '待检查' }}
+                      {{ imageRuntime.serviceOnline ? t("已载入") : t("待检查") }}
                     </el-tag>
                   </div>
                   <div class="model-specs">
-                    <span>{{ imageRuntime.modelFiles.length }} 个组合文件</span>
-                    <span class="model-capability">生成图片</span>
-                    <span class="model-capability">修改图片</span>
+                    <span>{{ imageRuntime.modelFiles.length }} {{ t("个组合文件") }}</span>
+                    <span class="model-capability">{{ t("生成图片") }}</span>
+                    <span class="model-capability">{{ t("修改图片") }}</span>
                   </div>
                 </div>
                 <div class="model-actions">
@@ -6279,7 +6198,7 @@ onBeforeUnmount(() => {
                       class="status-dot"
                       :class="{ muted: !imageRuntime.serviceOnline }"
                     ></span>
-                    {{ imageRuntime.serviceOnline ? '运行正常' : '尚未载入' }}
+                    {{ imageRuntime.serviceOnline ? t("运行正常") : t("尚未载入") }}
                   </span>
                   <el-button
                     :disabled="
@@ -6290,8 +6209,8 @@ onBeforeUnmount(() => {
                   >
                     {{
                       selectedImageProvider?.id === 'local-runtime'
-                        ? '使用中'
-                        : '用于创作'
+                        ? t("使用中")
+                        : t("用于创作")
                     }}
                   </el-button>
                 </div>
@@ -6301,9 +6220,7 @@ onBeforeUnmount(() => {
                 v-if="section.key === 'image' && imageRuntime.modelFiles.length"
                 class="managed-model-files"
               >
-                <summary>
-                  查看 {{ imageRuntime.modelFiles.length }} 个图片模型文件
-                </summary>
+                <summary> {{ t("查看") }} {{ imageRuntime.modelFiles.length }} {{ t("个图片模型文件") }} </summary>
                 <div>
                   <div
                     v-for="fileName in imageRuntime.modelFiles"
@@ -6316,7 +6233,7 @@ onBeforeUnmount(() => {
                       type="danger"
                       size="small"
                       :disabled="imageGenerating || imageModelImporting"
-                      :aria-label="`删除 ${fileName}`"
+                      :aria-label="t('删除 {0}', [fileName])"
                       @click="removeImageModelFile(fileName)"
                     >
                       <el-icon><Delete /></el-icon>
@@ -6342,42 +6259,30 @@ onBeforeUnmount(() => {
                       type="success"
                       effect="plain"
                       size="small"
-                    >
-                      当前
-                    </el-tag>
+                    > {{ t("当前") }} </el-tag>
                   </div>
                   <div class="model-specs">
                     <span>{{ model.size }}</span>
                     <span
                       v-if="model.capabilities.includes('vision')"
                       class="model-capability"
-                    >
-                      支持图片
-                    </span>
+                    > {{ t("支持图片") }} </span>
                     <span
                       v-if="model.capabilities.includes('embedding')"
                       class="model-capability"
-                    >
-                      资料查找
-                    </span>
+                    > {{ t("资料查找") }} </span>
                     <span
                       v-if="isImageGenerationModel(model)"
                       class="model-capability"
-                    >
-                      图片创作
-                    </span>
+                    > {{ t("图片创作") }} </span>
                     <span
                       v-if="model.capabilities.includes('thinking')"
                       class="model-capability"
-                    >
-                      回答思路
-                    </span>
+                    > {{ t("回答思路") }} </span>
                     <span
                       v-if="!model.detailsAvailable"
                       class="model-capability muted"
-                    >
-                      信息待确认
-                    </span>
+                    > {{ t("信息待确认") }} </span>
                   </div>
                 </div>
                 <div class="model-actions">
@@ -6386,7 +6291,7 @@ onBeforeUnmount(() => {
                       class="status-dot"
                       :class="{ muted: model.status !== 'ready' }"
                     ></span>
-                    {{ model.status === 'ready' ? '实际已载入' : '已安装 · 未加载' }}
+                    {{ model.status === 'ready' ? t("实际已载入") : t("已安装 · 未加载") }}
                   </span>
                   <el-button
                     :disabled="isManagedModelSelected(model, section.key)"
@@ -6405,7 +6310,7 @@ onBeforeUnmount(() => {
                     text
                     type="danger"
                     :disabled="isGenerating"
-                    :aria-label="`删除 ${model.fullName}`"
+                    :aria-label="t('删除 {0}', [model.fullName])"
                     @click="removeModel(model)"
                   >
                     <el-icon><Delete /></el-icon>
@@ -6424,20 +6329,20 @@ onBeforeUnmount(() => {
                   {{
                     section.key === 'conversation'
                       ? ollamaConnected
-                        ? '还没有对话模型'
-                        : 'AI 服务尚未启动'
+                        ? t("还没有对话模型")
+                        : t("AI 服务尚未启动")
                       : section.key === 'knowledge'
-                        ? '尚未添加资料查找模型'
-                        : '尚未添加图片生成模型'
+                        ? t("尚未添加资料查找模型")
+                        : t("尚未添加图片生成模型")
                   }}
                 </strong>
                 <span>
                   {{
                     section.key === 'knowledge'
-                      ? '没有专用模型时仍可使用普通文字查找'
+                      ? t("没有专用模型时仍可使用普通文字查找")
                       : section.key === 'image'
-                        ? '添加完整图片模型后，可在对话中直接生成和修改图片'
-                        : ollamaError || '点击右上角“添加模型”开始使用'
+                        ? t("添加完整图片模型后，可在对话中直接生成和修改图片")
+                        : ollamaError || t("点击右上角“添加模型”开始使用")
                   }}
                 </span>
               </div>
@@ -6448,24 +6353,21 @@ onBeforeUnmount(() => {
               class="vision-model-warning"
               role="alert"
             >
-              {{ imageRuntime.runtimeError }}
+              {{ t(imageRuntime.runtimeError || '') }}
             </div>
           </section>
 
           <details class="vision-model-guide managed-model-guide">
-            <summary>模型推荐与安装帮助</summary>
+            <summary>{{ t("模型推荐与安装帮助") }}</summary>
             <div class="managed-model-guide-content">
               <div class="vision-guide-heading">
                 <div>
-                  <span>适合当前电脑</span>
-                  <h3>安装可以识别图片的模型</h3>
+                  <span>{{ t("适合当前电脑") }}</span>
+                  <h3>{{ t("安装可以识别图片的模型") }}</h3>
                 </div>
-                <el-tag type="success" effect="plain">文字和图片</el-tag>
+                <el-tag type="success" effect="plain">{{ t("文字和图片") }}</el-tag>
               </div>
-              <p>
-                点击下方内容即可复制，然后粘贴到运行服务的电脑中进行安装。
-                安装完成后点击“刷新”。
-              </p>
+              <p> {{ t("点击下方内容即可复制，然后粘贴到运行服务的电脑中进行安装。 安装完成后点击“刷新”。") }} </p>
               <article
                 v-for="recommendation in visionModelRecommendations"
                 :key="recommendation.command"
@@ -6473,17 +6375,17 @@ onBeforeUnmount(() => {
               >
                 <div>
                   <span>
-                    {{ recommendation.label }} · {{ recommendation.size }}
+                    {{ t(recommendation.label) }} · {{ recommendation.size }}
                   </span>
-                  <strong>{{ recommendation.name }}</strong>
-                  <small>{{ recommendation.note }}</small>
+                  <strong>{{ t(recommendation.name) }}</strong>
+                  <small>{{ t(recommendation.note) }}</small>
                 </div>
                 <button
                   type="button"
-                  :aria-label="`复制 ${recommendation.name} 的安装内容`"
+                  :aria-label="t('复制 {0} 的安装内容', [recommendation.name])"
                   @click="copyInstallCommand(recommendation.command)"
                 >
-                  <span>复制安装内容</span>
+                  <span>{{ t("复制安装内容") }}</span>
                   <el-icon><CopyDocument /></el-icon>
                 </button>
               </article>
@@ -6498,16 +6400,16 @@ onBeforeUnmount(() => {
           >
             <span class="import-entry-icon"><el-icon><Plus /></el-icon></span>
             <span>
-              <strong>从电脑添加模型</strong>
-              <small>选择下载页中的文件，系统自动判断模型用途并组合</small>
+              <strong>{{ t("从电脑添加模型") }}</strong>
+              <small>{{ t("选择下载页中的文件，系统自动判断模型用途并组合") }}</small>
             </span>
             <el-icon class="import-arrow"><ArrowRight /></el-icon>
           </button>
           <div v-else class="host-managed-note">
             <el-icon><Lock /></el-icon>
             <div>
-              <strong>模型由主机统一管理</strong>
-              <span>这台电脑可以正常使用模型，但安装和删除需要在运行 ShotAI 的主机上操作。</span>
+              <strong>{{ t("模型由主机统一管理") }}</strong>
+              <span>{{ t("这台电脑可以正常使用模型，但安装和删除需要在运行 ShotAI 的主机上操作。") }}</span>
             </div>
           </div>
         </div>
@@ -6516,15 +6418,15 @@ onBeforeUnmount(() => {
       <el-drawer
         v-model="knowledgeDrawerOpen"
         class="product-drawer knowledge-drawer"
-        title="我的资料"
+        :title="t('我的资料')"
         size="min(960px, 96vw)"
         append-to-body
       >
         <template #header>
           <div class="drawer-heading">
             <div>
-              <h2>我的资料</h2>
-              <p>添加常用文件，让 ShotAI 可以根据这些内容回答</p>
+              <h2>{{ t("我的资料") }}</h2>
+              <p>{{ t("添加常用文件，让 ShotAI 可以根据这些内容回答") }}</p>
             </div>
             <div class="drawer-actions">
               <el-tag
@@ -6536,53 +6438,49 @@ onBeforeUnmount(() => {
                 {{ knowledgePersistenceLabel }}
               </el-tag>
               <el-button type="primary" @click="createNewKnowledgeBase">
-                <el-icon><Plus /></el-icon>
-                新建资料夹
-              </el-button>
+                <el-icon><Plus /></el-icon> {{ t("新建资料夹") }} </el-button>
             </div>
           </div>
         </template>
 
         <div class="drawer-content knowledge-content">
           <details class="knowledge-more-settings">
-            <summary>资料查找设置</summary>
+            <summary>{{ t("资料查找设置") }}</summary>
             <div class="knowledge-more-content">
               <section class="knowledge-telemetry">
                 <div>
-                  <span>资料夹</span>
+                  <span>{{ t("资料夹") }}</span>
                   <strong>{{ knowledgeBases.length }}</strong>
-                  <small>用于分类整理</small>
+                  <small>{{ t("用于分类整理") }}</small>
                 </div>
                 <div>
-                  <span>文件</span>
+                  <span>{{ t("文件") }}</span>
                   <strong>{{ totalKnowledgeDocuments }}</strong>
-                  <small>已经添加</small>
+                  <small>{{ t("已经添加") }}</small>
                 </div>
                 <div>
-                  <span>内容</span>
+                  <span>{{ t("内容") }}</span>
                   <strong>{{ totalKnowledgeChunks }}</strong>
-                  <small>已经整理</small>
+                  <small>{{ t("已经整理") }}</small>
                 </div>
                 <div>
-                  <span>当前使用</span>
+                  <span>{{ t("当前使用") }}</span>
                   <strong>{{ activeKnowledgeBases.length }}</strong>
-                  <small>用于本次对话</small>
+                  <small>{{ t("用于本次对话") }}</small>
                 </div>
               </section>
 
               <section class="embedding-panel">
                 <div>
-                  <span class="panel-code">查找方式</span>
-                  <h3>资料查找助手</h3>
-                  <p>
-                    安装后查找资料会更准确；没有安装时仍然可以使用普通文字查找。
-                  </p>
+                  <span class="panel-code">{{ t("查找方式") }}</span>
+                  <h3>{{ t("资料查找助手") }}</h3>
+                  <p> {{ t("安装后查找资料会更准确；没有安装时仍然可以使用普通文字查找。") }} </p>
                 </div>
                 <div class="embedding-actions">
                   <el-select
                     v-model="embeddingModelId"
-                    aria-label="选择资料查找助手"
-                    placeholder="尚未安装资料查找助手"
+                    :aria-label="t('选择资料查找助手')"
+                    :placeholder="t('尚未安装资料查找助手')"
                     clearable
                     :disabled="knowledgeImporting"
                   >
@@ -6602,16 +6500,12 @@ onBeforeUnmount(() => {
                     :loading="knowledgeImporting"
                     @click="rebuildKnowledgeIndex"
                   >
-                    <el-icon><RefreshRight /></el-icon>
-                    重新整理当前资料
-                  </el-button>
+                    <el-icon><RefreshRight /></el-icon> {{ t("重新整理当前资料") }} </el-button>
                 </div>
                 <div
                   v-if="embeddingModels.length === 0"
                   class="knowledge-inline-warning"
-                >
-                  尚未安装资料查找助手。你仍然可以添加资料，并使用普通文字查找。
-                </div>
+                > {{ t("尚未安装资料查找助手。你仍然可以添加资料，并使用普通文字查找。") }} </div>
               </section>
             </div>
           </details>
@@ -6619,8 +6513,8 @@ onBeforeUnmount(() => {
           <div class="knowledge-layout">
             <aside class="knowledge-base-panel">
               <div class="knowledge-panel-heading">
-                <span>资料分类</span>
-                <strong>资料夹列表</strong>
+                <span>{{ t("资料分类") }}</span>
+                <strong>{{ t("资料夹列表") }}</strong>
               </div>
               <div class="knowledge-base-list">
                 <article
@@ -6642,8 +6536,7 @@ onBeforeUnmount(() => {
                     <span>
                       <strong>{{ knowledgeBase.name }}</strong>
                       <small>
-                        {{ knowledgeBase.documents.length }} 个文件
-                      </small>
+                        {{ knowledgeBase.documents.length }} {{ t("个文件") }} </small>
                     </span>
                     <el-icon><ArrowRight /></el-icon>
                   </button>
@@ -6659,9 +6552,7 @@ onBeforeUnmount(() => {
                         Boolean($event),
                       )
                     "
-                  >
-                    用于当前对话
-                  </el-checkbox>
+                  > {{ t("用于当前对话") }} </el-checkbox>
                 </article>
               </div>
             </aside>
@@ -6672,21 +6563,21 @@ onBeforeUnmount(() => {
             >
               <div class="knowledge-document-heading">
                 <div>
-                  <span>文件列表</span>
+                  <span>{{ t("文件列表") }}</span>
                   <h3>{{ selectedKnowledgeBase.name }}</h3>
                   <p>{{ selectedKnowledgeBase.description }}</p>
                 </div>
                 <div>
                   <el-button
                     circle
-                    aria-label="重命名资料夹"
+                    :aria-label="t('重命名资料夹')"
                     @click="renameKnowledgeBase(selectedKnowledgeBase)"
                   >
                     <el-icon><EditPen /></el-icon>
                   </el-button>
                   <el-button
                     circle
-                    aria-label="删除资料夹"
+                    :aria-label="t('删除资料夹')"
                     @click="deleteKnowledgeBase(selectedKnowledgeBase)"
                   >
                     <el-icon><Delete /></el-icon>
@@ -6705,13 +6596,10 @@ onBeforeUnmount(() => {
                 :on-change="handleKnowledgeFileChange"
               >
                 <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-                <div class="el-upload__text">
-                  将资料拖到这里，或 <em>选择本地文件</em>
+                <div class="el-upload__text"> {{ t("将资料拖到这里，或") }} <em>{{ t("选择本地文件") }}</em>
                 </div>
                 <template #tip>
-                  <div class="el-upload__tip">
-                    支持文本、PDF、Word 和 Excel 文件；每个文件最大 20 MB
-                  </div>
+                  <div class="el-upload__tip"> {{ t("支持文本、PDF、Word 和 Excel 文件；每个文件最大 20 MB") }} </div>
                 </template>
               </el-upload>
 
@@ -6720,7 +6608,7 @@ onBeforeUnmount(() => {
                 class="knowledge-progress"
               >
                 <div>
-                  <span>{{ knowledgeImportStatus }}</span>
+                  <span>{{ t(knowledgeImportStatus) }}</span>
                   <strong>{{ knowledgeImportProgress }}%</strong>
                 </div>
                 <el-progress
@@ -6738,8 +6626,8 @@ onBeforeUnmount(() => {
                   class="knowledge-empty"
                 >
                   <el-icon><DocumentAdd /></el-icon>
-                  <strong>这个资料夹还是空的</strong>
-                  <span>添加一份文件后，ShotAI 就可以根据它回答问题。</span>
+                  <strong>{{ t("这个资料夹还是空的") }}</strong>
+                  <span>{{ t("添加一份文件后，ShotAI 就可以根据它回答问题。") }}</span>
                 </div>
                 <article
                   v-for="document in selectedKnowledgeBase.documents"
@@ -6751,20 +6639,19 @@ onBeforeUnmount(() => {
                     <strong>{{ document.name }}</strong>
                     <span>
                       {{ formatFileSize(document.size) }} ·
-                      {{ document.characterCount.toLocaleString() }} 字
-                    </span>
+                      {{ document.characterCount.toLocaleString() }} {{ t("字") }} </span>
                   </div>
                   <el-tag
                     :type="document.embeddingModel ? 'success' : 'info'"
                     effect="plain"
                     size="small"
                   >
-                    {{ document.embeddingModel ? '智能查找' : '普通查找' }}
+                    {{ document.embeddingModel ? t("智能查找") : t("普通查找") }}
                   </el-tag>
                   <el-button
                     text
                     circle
-                    :aria-label="`删除 ${document.name}`"
+                    :aria-label="t('删除 {0}', [document.name])"
                     @click="deleteKnowledgeDocument(document)"
                   >
                     <el-icon><Delete /></el-icon>
@@ -6779,15 +6666,15 @@ onBeforeUnmount(() => {
       <el-drawer
         v-model="diagnosticsDrawerOpen"
         class="product-drawer"
-        title="运行检查"
+        :title="t('运行检查')"
         size="min(560px, 94vw)"
         append-to-body
       >
         <template #header>
           <div class="drawer-heading">
             <div>
-              <h2>运行检查</h2>
-              <p>检查服务是否启动，以及模型能否正常使用</p>
+              <h2>{{ t("运行检查") }}</h2>
+              <p>{{ t("检查服务是否启动，以及模型能否正常使用") }}</p>
             </div>
             <el-tag
               :type="
@@ -6833,11 +6720,11 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="hardware-section">
-            <h3>模型使用情况</h3>
+            <h3>{{ t("模型使用情况") }}</h3>
             <div class="hardware-row">
-              <span>模型</span>
+              <span>{{ t("模型") }}</span>
               <div>
-                <strong>已经安装的模型</strong>
+                <strong>{{ t("已经安装的模型") }}</strong>
                 <el-progress
                   :percentage="models.length ? 100 : 0"
                   :show-text="false"
@@ -6846,9 +6733,9 @@ onBeforeUnmount(() => {
               <small>{{ totalModelSize }}</small>
             </div>
             <div class="hardware-row">
-              <span>运行</span>
+              <span>{{ t("运行") }}</span>
               <div>
-                <strong>当前正在使用</strong>
+                <strong>{{ t("当前正在使用") }}</strong>
                 <el-progress
                   :percentage="models.length ? Math.round((runningModelIds.length / models.length) * 100) : 0"
                   :show-text="false"
@@ -6864,24 +6751,22 @@ onBeforeUnmount(() => {
             :loading="ollamaRefreshing"
             @click="refreshOllama({ announce: true })"
           >
-            <el-icon><RefreshRight /></el-icon>
-            重新检查
-          </el-button>
+            <el-icon><RefreshRight /></el-icon> {{ t("重新检查") }} </el-button>
         </div>
       </el-drawer>
 
       <el-drawer
         v-model="settingsDrawerOpen"
         class="product-drawer settings-drawer"
-        title="设置"
+        :title="t('设置')"
         size="min(620px, 94vw)"
         append-to-body
       >
         <template #header>
           <div class="drawer-heading">
             <div>
-              <h2>设置</h2>
-              <p>管理模型、资料、运行状态和回答方式</p>
+              <h2>{{ t("设置") }}</h2>
+              <p>{{ t("管理模型、资料、运行状态和回答方式") }}</p>
             </div>
             <el-tag
               :type="persistenceState === 'error' ? 'danger' : 'success'"
@@ -6899,10 +6784,10 @@ onBeforeUnmount(() => {
           <section class="settings-section">
             <div class="settings-section-heading">
               <div>
-                <span>使用准备</span>
-                <h3>AI 能力</h3>
+                <span>{{ t("使用准备") }}</span>
+                <h3>{{ t("AI 能力") }}</h3>
               </div>
-              <small>系统会自动选择</small>
+              <small>{{ t("系统会自动选择") }}</small>
             </div>
 
             <div class="capability-overview">
@@ -6933,24 +6818,26 @@ onBeforeUnmount(() => {
               </button>
             </div>
 
+            <LanguageSetting />
+
             <div class="theme-setting-row">
               <div>
                 <el-icon><Moon v-if="darkMode" /><Sunny v-else /></el-icon>
                 <span>
-                  <strong>深色主题</strong>
-                  <small>切换工作台的明暗外观</small>
+                  <strong>{{ t("深色主题") }}</strong>
+                  <small>{{ t("切换工作台的明暗外观") }}</small>
                 </span>
               </div>
               <el-switch
                 v-model="darkMode"
-                aria-label="切换深色主题"
+                :aria-label="t('切换深色主题')"
               />
             </div>
 
             <div class="version-setting-row">
               <span>ShotAI {{ systemInfo.version }}</span>
               <small>
-                {{ systemInfo.canManage ? '主机管理模式' : '内网使用模式' }}
+                {{ systemInfo.canManage ? t("主机管理模式") : t("内网使用模式") }}
               </small>
             </div>
           </section>
@@ -6958,24 +6845,24 @@ onBeforeUnmount(() => {
           <section class="settings-section">
             <div class="settings-section-heading">
               <div>
-                <span>当前对话</span>
-                <h3>对话设置</h3>
+                <span>{{ t("当前对话") }}</span>
+                <h3>{{ t("对话设置") }}</h3>
               </div>
-              <small>仅影响当前对话</small>
+              <small>{{ t("仅影响当前对话") }}</small>
             </div>
 
             <el-form label-position="top">
-              <el-form-item label="对话名称">
+              <el-form-item :label="t('对话名称')">
                 <el-input
                   v-model="activeConversationRecord.label"
                   maxlength="60"
                   show-word-limit
                 />
               </el-form-item>
-              <el-form-item label="当前使用的 AI">
+              <el-form-item :label="t('当前使用的 AI')">
                 <el-select
                   v-model="currentModelId"
-                  placeholder="请选择模型"
+                  :placeholder="t('请选择模型')"
                   :disabled="models.length === 0 || isGenerating"
                 >
                   <el-option
@@ -6985,22 +6872,18 @@ onBeforeUnmount(() => {
                     :value="model.id"
                   />
                 </el-select>
-                <div class="field-help">
-                  每个对话可以使用不同的模型。
-                </div>
+                <div class="field-help"> {{ t("每个对话可以使用不同的模型。") }} </div>
               </el-form-item>
-              <el-form-item label="回答要求">
+              <el-form-item :label="t('回答要求')">
                 <el-input
                   v-model="activeConversationRecord.systemPrompt"
                   type="textarea"
                   :rows="6"
                   maxlength="2000"
                   show-word-limit
-                  placeholder="例如：请用简洁、正式的中文回答"
+                  :placeholder="t('例如：请用简洁、正式的中文回答')"
                 />
-                <div class="field-help">
-                  这里的要求会用于当前对话，并且只保存在这台电脑上。
-                </div>
+                <div class="field-help"> {{ t("这里的要求会用于当前对话，并且只保存在这台电脑上。") }} </div>
               </el-form-item>
             </el-form>
           </section>
@@ -7008,32 +6891,32 @@ onBeforeUnmount(() => {
           <section class="settings-section">
             <div class="settings-section-heading">
               <div>
-                <span>回答方式</span>
-                <h3>回答偏好</h3>
+                <span>{{ t("回答方式") }}</span>
+                <h3>{{ t("回答偏好") }}</h3>
               </div>
-              <small>仅影响当前对话</small>
+              <small>{{ t("仅影响当前对话") }}</small>
             </div>
 
             <div class="parameter-list">
               <div class="parameter-row parameter-switch-row">
                 <div>
-                  <strong>显示回答思路</strong>
+                  <strong>{{ t("显示回答思路") }}</strong>
                   <span>
                     {{ selectedModel.capabilities.includes('thinking')
-                      ? '关闭后只显示最终回答，也会减少等待时间'
-                      : '当前模型不支持思考输出，这个开关不会改变回答' }}
+                      ? t("关闭后只显示最终回答，也会减少等待时间")
+                      : t("当前模型不支持思考输出，这个开关不会改变回答") }}
                   </span>
                 </div>
                 <el-switch
                   v-model="showReasoning"
                   :disabled="!selectedModel.capabilities.includes('thinking')"
-                  aria-label="显示回答思路"
+                  :aria-label="t('显示回答思路')"
                 />
               </div>
               <div class="parameter-row">
                 <div>
-                  <strong>回答变化程度</strong>
-                  <span>越低越稳定，越高越有变化；部分模型会自行限制随机性</span>
+                  <strong>{{ t("回答变化程度") }}</strong>
+                  <span>{{ t("越低越稳定，越高越有变化；部分模型会自行限制随机性") }}</span>
                 </div>
                 <el-slider
                   v-model="activeConversationRecord.settings.temperature"
@@ -7041,13 +6924,13 @@ onBeforeUnmount(() => {
                   :max="2"
                   :step="0.1"
                   show-input
-                  aria-label="回答变化程度"
+                  :aria-label="t('回答变化程度')"
                 />
               </div>
               <div class="parameter-row">
                 <div>
-                  <strong>用词丰富程度</strong>
-                  <span>越低越直接，越高越丰富</span>
+                  <strong>{{ t("用词丰富程度") }}</strong>
+                  <span>{{ t("越低越直接，越高越丰富") }}</span>
                 </div>
                 <el-slider
                   v-model="activeConversationRecord.settings.topP"
@@ -7055,51 +6938,51 @@ onBeforeUnmount(() => {
                   :max="1"
                   :step="0.05"
                   show-input
-                  aria-label="用词丰富程度"
+                  :aria-label="t('用词丰富程度')"
                 />
               </div>
               <div class="parameter-row parameter-select-row">
                 <div>
-                  <strong>可以记住的内容</strong>
-                  <span>越长会占用更多电脑内存</span>
+                  <strong>{{ t("可以记住的内容") }}</strong>
+                  <span>{{ t("越长会占用更多电脑内存") }}</span>
                 </div>
                 <el-select
                   v-model="activeConversationRecord.settings.contextLength"
-                  aria-label="可以记住的内容"
+                  :aria-label="t('可以记住的内容')"
                 >
                   <el-option
                     v-for="option in [
-                      { label: '较短', value: 2048 },
-                      { label: '标准', value: 4096 },
-                      { label: '较长', value: 8192 },
-                      { label: '很长', value: 16384 },
-                      { label: '最长', value: 32768 },
+                      { label: t('较短'), value: 2048 },
+                      { label: t('标准'), value: 4096 },
+                      { label: t('较长'), value: 8192 },
+                      { label: t('很长'), value: 16384 },
+                      { label: t('最长'), value: 32768 },
                     ]"
                     :key="option.value"
-                    :label="option.label"
+                    :label="t(option.label)"
                     :value="option.value"
                   />
                 </el-select>
               </div>
               <div class="parameter-row parameter-select-row">
                 <div>
-                  <strong>回答长度</strong>
-                  <span>控制每次回答最多可以写多长</span>
+                  <strong>{{ t("回答长度") }}</strong>
+                  <span>{{ t("控制每次回答最多可以写多长") }}</span>
                 </div>
                 <el-select
                   v-model="activeConversationRecord.settings.maxOutput"
-                  aria-label="回答长度"
+                  :aria-label="t('回答长度')"
                 >
                   <el-option
                     v-for="option in [
-                      { label: '简短', value: 256 },
-                      { label: '适中', value: 512 },
-                      { label: '详细', value: 1024 },
-                      { label: '很长', value: 2048 },
-                      { label: '最长', value: 4096 },
+                      { label: t('简短'), value: 256 },
+                      { label: t('适中'), value: 512 },
+                      { label: t('详细'), value: 1024 },
+                      { label: t('很长'), value: 2048 },
+                      { label: t('最长'), value: 4096 },
                     ]"
                     :key="option.value"
-                    :label="option.label"
+                    :label="t(option.label)"
                     :value="option.value"
                   />
                 </el-select>
@@ -7111,8 +6994,8 @@ onBeforeUnmount(() => {
             <div>
               <el-icon><Lock /></el-icon>
               <div>
-                <strong>自动保存在这台电脑</strong>
-                <span>对话和设置不会发送到其他地方。</span>
+                <strong>{{ t("自动保存在这台电脑") }}</strong>
+                <span>{{ t("对话和设置不会发送到其他地方。") }}</span>
               </div>
             </div>
             <span class="local-data-state">
@@ -7127,61 +7010,55 @@ onBeforeUnmount(() => {
           <section class="settings-section data-cleanup-section">
             <div class="settings-section-heading">
               <div>
-                <span>本机数据</span>
-                <h3>清理与刷新</h3>
+                <span>{{ t("本机数据") }}</span>
+                <h3>{{ t("清理与刷新") }}</h3>
               </div>
-              <small>按需操作</small>
+              <small>{{ t("按需操作") }}</small>
             </div>
             <div class="cleanup-list">
               <div>
-                <span><strong>刷新网页文件</strong><small>页面异常或更新后仍显示旧内容时使用</small></span>
-                <el-button @click="refreshBrowserFiles">立即刷新</el-button>
+                <span><strong>{{ t("刷新网页文件") }}</strong><small>{{ t("页面异常或更新后仍显示旧内容时使用") }}</small></span>
+                <el-button @click="refreshBrowserFiles">{{ t("立即刷新") }}</el-button>
               </div>
               <div v-if="systemInfo.canManage">
-                <span><strong>模型临时文件</strong><small>清理中断上传和已不再使用的数据，不删除已安装模型</small></span>
+                <span><strong>{{ t("模型临时文件") }}</strong><small>{{ t("清理中断上传和已不再使用的数据，不删除已安装模型") }}</small></span>
                 <el-button
                   :loading="modelCacheCleaning"
                   @click="clearModelCacheFiles"
-                >
-                  清理临时文件
-                </el-button>
+                > {{ t("清理临时文件") }} </el-button>
               </div>
               <div v-if="systemInfo.canManage">
-                <span><strong>完整清理对话与检索模型</strong><small>删除已导入模型、卸载内存并清理无引用权重；保留会话、资料与独立图片模型</small></span>
-                <el-button type="danger" plain :loading="allModelsRemoving" :disabled="isGenerating || modelCacheCleaning" @click="removeAllConversationModels">完整清理模型</el-button>
+                <span><strong>{{ t("完整清理对话与检索模型") }}</strong><small>{{ t("删除已导入模型、卸载内存并清理无引用权重；保留会话、资料与独立图片模型") }}</small></span>
+                <el-button type="danger" plain :loading="allModelsRemoving" :disabled="isGenerating || modelCacheCleaning" @click="removeAllConversationModels">{{ t("完整清理模型") }}</el-button>
               </div>
               <div>
-                <span><strong>全部对话</strong><small>{{ conversations.length }} 条本地记录</small></span>
-                <el-button type="danger" plain @click="clearSavedConversations">清空</el-button>
+                <span><strong>{{ t("全部对话") }}</strong><small>{{ conversations.length }} {{ t("条本地记录") }}</small></span>
+                <el-button type="danger" plain @click="clearSavedConversations">{{ t("清空") }}</el-button>
               </div>
               <div>
-                <span><strong>全部资料</strong><small>{{ totalKnowledgeDocuments }} 个文件</small></span>
-                <el-button type="danger" plain @click="clearSavedKnowledge">清空</el-button>
+                <span><strong>{{ t("全部资料") }}</strong><small>{{ totalKnowledgeDocuments }} {{ t("个文件") }}</small></span>
+                <el-button type="danger" plain @click="clearSavedKnowledge">{{ t("清空") }}</el-button>
               </div>
               <div>
-                <span><strong>生成图片记录</strong><small>{{ imageHistory.length }} 张本地图片</small></span>
+                <span><strong>{{ t("生成图片记录") }}</strong><small>{{ imageHistory.length }} {{ t("张本地图片") }}</small></span>
                 <el-button
                   type="danger"
                   plain
                   :disabled="imageHistory.length === 0"
                   @click="clearGeneratedImageHistory"
-                >
-                  清空
-                </el-button>
+                > {{ t("清空") }} </el-button>
               </div>
             </div>
           </section>
 
-          <el-button class="report-button" plain @click="resetConversationSettings">
-            恢复默认设置
-          </el-button>
+          <el-button class="report-button" plain @click="resetConversationSettings"> {{ t("恢复默认设置") }} </el-button>
         </div>
       </el-drawer>
 
       <el-drawer
         v-model="monitorDrawerOpen"
         class="product-drawer monitor-drawer"
-        title="主机监控"
+        :title="t('主机监控')"
         size="min(920px, 96vw)"
         append-to-body
         destroy-on-close
@@ -7189,15 +7066,13 @@ onBeforeUnmount(() => {
         <template #header>
           <div class="drawer-heading monitor-heading">
             <div>
-              <h2>主机监控</h2>
-              <p>只在运行 ShotAI 的电脑上查看连接与运行状态</p>
+              <h2>{{ t("主机监控") }}</h2>
+              <p>{{ t("只在运行 ShotAI 的电脑上查看连接与运行状态") }}</p>
             </div>
             <div v-if="monitorAuthenticated" class="monitor-heading-actions">
-              <span class="monitor-live"><i></i>实时更新</span>
+              <span class="monitor-live"><i></i>{{ t("实时更新") }}</span>
               <el-button text @click="signOutMonitor">
-                <el-icon><SwitchButton /></el-icon>
-                退出
-              </el-button>
+                <el-icon><SwitchButton /></el-icon> {{ t("退出") }} </el-button>
             </div>
           </div>
         </template>
@@ -7208,37 +7083,37 @@ onBeforeUnmount(() => {
               <el-icon><Lock /></el-icon>
             </div>
             <span class="monitor-kicker">HOST CONTROL</span>
-            <h3 id="monitor-login-title">管理员验证</h3>
-            <p>监控信息不会向局域网中的其他电脑开放。</p>
+            <h3 id="monitor-login-title">{{ t("管理员验证") }}</h3>
+            <p>{{ t("监控信息不会向局域网中的其他电脑开放。") }}</p>
             <form
               method="post"
               action="/shotai/monitor/login"
               @submit.prevent="submitMonitorLogin"
             >
               <label>
-                <span>用户名</span>
+                <span>{{ t("用户名") }}</span>
                 <el-input
                   v-model="monitorUsername"
                   autocomplete="username"
-                  aria-label="管理员用户名"
+                  :aria-label="t('管理员用户名')"
                 >
                   <template #prefix><el-icon><User /></el-icon></template>
                 </el-input>
               </label>
               <label>
-                <span>密码</span>
+                <span>{{ t("密码") }}</span>
                 <el-input
                   v-model="monitorPassword"
                   :type="monitorPasswordVisible ? 'text' : 'password'"
                   autocomplete="current-password"
-                  aria-label="管理员密码"
+                  :aria-label="t('管理员密码')"
                 >
                   <template #prefix><el-icon><Lock /></el-icon></template>
                   <template #suffix>
                     <button
                       class="monitor-password-toggle"
                       type="button"
-                      :aria-label="monitorPasswordVisible ? '隐藏密码' : '显示密码'"
+                      :aria-label="monitorPasswordVisible ? t('隐藏密码') : t('显示密码')"
                       @click="monitorPasswordVisible = !monitorPasswordVisible"
                     >
                       <el-icon><Hide v-if="monitorPasswordVisible" /><View v-else /></el-icon>
@@ -7247,16 +7122,14 @@ onBeforeUnmount(() => {
                 </el-input>
               </label>
               <div v-if="monitorLoginError" class="monitor-login-error" role="alert">
-                {{ monitorLoginError }}
+                {{ t(monitorLoginError) }}
               </div>
               <el-button
                 class="monitor-login-button"
                 type="primary"
                 native-type="submit"
                 :loading="monitorLoginLoading"
-              >
-                进入监控平台
-              </el-button>
+              > {{ t("进入监控平台") }} </el-button>
             </form>
           </section>
         </div>
@@ -7264,32 +7137,31 @@ onBeforeUnmount(() => {
         <div v-else-if="monitorSnapshot" class="monitor-dashboard">
           <section class="monitor-overview">
             <article class="monitor-hero-card">
-              <span class="monitor-card-label">当前在线</span>
+              <span class="monitor-card-label">{{ t("当前在线") }}</span>
               <strong>{{ monitorSnapshot.onlineCount }}</strong>
-              <small>台设备在最近一分钟内访问</small>
+              <small>{{ t("台设备在最近一分钟内访问") }}</small>
               <div class="monitor-orbit" aria-hidden="true"><i></i><i></i></div>
             </article>
             <article class="monitor-host-card">
               <div>
-                <span class="monitor-card-label">运行主机</span>
+                <span class="monitor-card-label">{{ t("运行主机") }}</span>
                 <strong>{{ monitorSnapshot.host.name }}</strong>
-                <small>
-                  已运行 {{ formatMonitorDuration(monitorSnapshot.host.uptimeSeconds) }}
+                <small> {{ t("已运行") }} {{ formatMonitorDuration(monitorSnapshot.host.uptimeSeconds) }}
                 </small>
               </div>
-              <span class="monitor-host-state"><i></i>正常</span>
+              <span class="monitor-host-state"><i></i>{{ t("正常") }}</span>
             </article>
           </section>
 
           <section
             class="monitor-runtime-card"
-            aria-label="当前模型运行方式"
+            :aria-label="t('当前模型运行方式')"
           >
             <div class="monitor-runtime-heading">
               <div>
-                <span class="monitor-card-label">AI 运行方式</span>
+                <span class="monitor-card-label">{{ t("AI 运行方式") }}</span>
                 <h3>
-                  {{ monitorSnapshot.performance.inference.model || '尚未载入对话模型' }}
+                  {{ monitorSnapshot.performance.inference.model || t("尚未载入对话模型") }}
                 </h3>
               </div>
               <span
@@ -7302,13 +7174,13 @@ onBeforeUnmount(() => {
 
             <div class="monitor-runtime-grid">
               <div>
-                <span>运行库配置（不代表实际加载）</span>
+                <span>{{ t("运行库配置（不代表实际加载）") }}</span>
                 <strong>
                   {{ monitorComputeLibraryLabel(monitorSnapshot.performance.inference.computeLibrary) }}
                 </strong>
               </div>
               <div>
-                <span>模型占用显存</span>
+                <span>{{ t("模型占用显存") }}</span>
                 <strong>
                   {{ monitorSnapshot.performance.inference.vramBytes
                     ? formatMonitorBytes(monitorSnapshot.performance.inference.vramBytes)
@@ -7316,32 +7188,28 @@ onBeforeUnmount(() => {
                 </strong>
               </div>
               <div>
-                <span>GPU 卸载层</span>
+                <span>{{ t("GPU 卸载层") }}</span>
                 <strong v-if="monitorSnapshot.performance.inference.totalLayers">
                   {{ monitorSnapshot.performance.inference.gpuLayers }} /
-                  {{ monitorSnapshot.performance.inference.totalLayers }} 层
-                </strong>
-                <strong v-else>未取得可归属层数</strong>
+                  {{ monitorSnapshot.performance.inference.totalLayers }} {{ t("层") }} </strong>
+                <strong v-else>{{ t("未取得可归属层数") }}</strong>
               </div>
               <div>
-                <span>运行模式</span>
+                <span>{{ t("运行模式") }}</span>
                 <strong>
-                  {{ monitorSnapshot.performance.inference.offline ? '完全离线' : '标准模式' }}
+                  {{ monitorSnapshot.performance.inference.offline ? t("完全离线") : t("标准模式") }}
                 </strong>
               </div>
               <div>
-                <span>用户容量</span>
+                <span>{{ t("用户容量") }}</span>
                 <strong>
                   {{ monitorSnapshot.performance.concurrency.activeClients ?? monitorSnapshot.performance.concurrency.running + monitorSnapshot.performance.concurrency.queued }} /
-                  {{ monitorSnapshot.performance.concurrency.maxActiveUsers }} 人
-                </strong>
+                  {{ monitorSnapshot.performance.concurrency.maxActiveUsers }} {{ t("人") }} </strong>
               </div>
               <div>
-                <span>负载调度</span>
+                <span>{{ t("负载调度") }}</span>
                 <strong>
-                  {{ monitorSnapshot.performance.concurrency.running }} 个运行 ·
-                  {{ monitorSnapshot.performance.concurrency.queued }} 个排队
-                </strong>
+                  {{ monitorSnapshot.performance.concurrency.running }} {{ t("个运行 ·") }} {{ monitorSnapshot.performance.concurrency.queued }} {{ t("个排队") }} </strong>
               </div>
             </div>
 
@@ -7352,25 +7220,25 @@ onBeforeUnmount(() => {
             >
               <span></span>
               <div>
-                <strong>模型仍在处理，请勿退出 ShotAI</strong>
-                <small>{{ monitorSnapshot.performance.modelOperation.status || '正在完成模型安装' }}</small>
+                <strong>{{ t("模型仍在处理，请勿退出 ShotAI") }}</strong>
+                <small>{{ t(monitorSnapshot.performance.modelOperation.status || '正在完成模型安装') }}</small>
               </div>
             </div>
           </section>
 
-          <section class="monitor-metrics" aria-label="主机性能">
+          <section class="monitor-metrics" :aria-label="t('主机性能')">
             <article class="monitor-metric-card">
               <div class="monitor-metric-heading">
-                <span>处理器</span><strong>{{ monitorSnapshot.performance.cpu.usagePercent.toFixed(0) }}%</strong>
+                <span>{{ t("处理器") }}</span><strong>{{ monitorSnapshot.performance.cpu.usagePercent.toFixed(0) }}%</strong>
               </div>
               <svg viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true">
                 <polyline :points="monitorChartPoints(monitorCpuHistory)" />
               </svg>
-              <small>{{ monitorSnapshot.performance.cpu.cores }} 个运行核心</small>
+              <small>{{ monitorSnapshot.performance.cpu.cores }} {{ t("个运行核心") }}</small>
             </article>
             <article class="monitor-metric-card">
               <div class="monitor-metric-heading">
-                <span>内存</span><strong>{{ monitorSnapshot.performance.memory.usagePercent.toFixed(0) }}%</strong>
+                <span>{{ t("内存") }}</span><strong>{{ monitorSnapshot.performance.memory.usagePercent.toFixed(0) }}%</strong>
               </div>
               <svg viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true">
                 <polyline :points="monitorChartPoints(monitorMemoryHistory)" />
@@ -7382,7 +7250,7 @@ onBeforeUnmount(() => {
             </article>
             <article class="monitor-metric-card">
               <div class="monitor-metric-heading">
-                <span>显卡</span>
+                <span>{{ t("显卡") }}</span>
                 <strong>
                   {{ monitorSnapshot.performance.gpu ? `${monitorSnapshot.performance.gpu.usagePercent}%` : '—' }}
                 </strong>
@@ -7394,15 +7262,14 @@ onBeforeUnmount(() => {
                 {{ monitorSnapshot.performance.gpu.name }} ·
                 {{ monitorSnapshot.performance.gpu.temperatureCelsius }}°C
               </small>
-              <small v-if="monitorSnapshot.performance.gpu">
-                显存 {{ formatMonitorBytes(monitorSnapshot.performance.gpu.memoryUsedBytes) }} /
+              <small v-if="monitorSnapshot.performance.gpu"> {{ t("显存") }} {{ formatMonitorBytes(monitorSnapshot.performance.gpu.memoryUsedBytes) }} /
                 {{ formatMonitorBytes(monitorSnapshot.performance.gpu.memoryTotalBytes) }}
               </small>
-              <small v-else>没有读取到 NVIDIA 显卡状态</small>
+              <small v-else>{{ t("没有读取到 NVIDIA 显卡状态") }}</small>
             </article>
             <article class="monitor-metric-card">
               <div class="monitor-metric-heading">
-                <span>磁盘</span>
+                <span>{{ t("磁盘") }}</span>
                 <strong>
                   {{ monitorSnapshot.performance.disk ? `${monitorSnapshot.performance.disk.usagePercent.toFixed(0)}%` : '—' }}
                 </strong>
@@ -7416,42 +7283,40 @@ onBeforeUnmount(() => {
                 {{ formatMonitorBytes(monitorSnapshot.performance.disk.usedBytes) }} /
                 {{ formatMonitorBytes(monitorSnapshot.performance.disk.totalBytes) }}
               </small>
-              <small v-else>暂时无法读取磁盘信息</small>
+              <small v-else>{{ t("暂时无法读取磁盘信息") }}</small>
             </article>
           </section>
 
           <section class="monitor-clients-card">
             <div class="monitor-section-heading">
               <div>
-                <span class="monitor-card-label">连接设备</span>
-                <h3>局域网访问记录</h3>
+                <span class="monitor-card-label">{{ t("连接设备") }}</span>
+                <h3>{{ t("局域网访问记录") }}</h3>
               </div>
               <label class="monitor-privacy-switch">
-                <span>隐藏 IP</span>
-                <el-switch v-model="monitorHideIps" aria-label="隐藏设备 IP" />
+                <span>{{ t("隐藏 IP") }}</span>
+                <el-switch v-model="monitorHideIps" :aria-label="t('隐藏设备 IP')" />
               </label>
             </div>
             <div v-if="monitorSnapshot.clients.length" class="monitor-client-list">
               <article v-for="client in monitorSnapshot.clients" :key="client.ip">
                 <span class="monitor-device-mark"><el-icon><Monitor /></el-icon></span>
                 <div>
-                  <strong>{{ client.host ? '本机工作台' : monitorClientLabel(client.userAgent) }}</strong>
+                  <strong>{{ client.host ? t("本机工作台") : monitorClientLabel(client.userAgent) }}</strong>
                   <small>{{ maskMonitorIp(client.ip) }}</small>
                 </div>
                 <span class="monitor-client-time">
                   {{ new Date(client.lastSeen).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }}
                 </span>
-                <i class="monitor-client-online" aria-label="在线"></i>
+                <i class="monitor-client-online" :aria-label="t('在线')"></i>
               </article>
             </div>
-            <div v-else class="monitor-client-empty">暂时没有其他设备访问</div>
+            <div v-else class="monitor-client-empty">{{ t("暂时没有其他设备访问") }}</div>
           </section>
         </div>
 
         <div v-else class="monitor-loading" role="status">
-          <span></span>
-          正在读取主机状态
-        </div>
+          <span></span> {{ t("正在读取主机状态") }} </div>
       </el-drawer>
 
       <el-dialog
@@ -7467,17 +7332,17 @@ onBeforeUnmount(() => {
           <div class="dialog-heading">
             <div class="dialog-icon"><el-icon><DocumentAdd /></el-icon></div>
             <div>
-              <h2>添加模型</h2>
-              <p>选择下载好的文件，文件不会发送到网络</p>
+              <h2>{{ t("添加模型") }}</h2>
+              <p>{{ t("选择下载好的文件，文件不会发送到网络") }}</p>
             </div>
           </div>
         </template>
 
         <el-steps :active="importStep" finish-status="success" align-center>
-          <el-step title="选择文件" />
-          <el-step title="检查文件" />
-          <el-step title="安装模型" />
-          <el-step title="完成" />
+          <el-step :title="t('选择文件')" />
+          <el-step :title="t('检查文件')" />
+          <el-step :title="t('安装模型')" />
+          <el-step :title="t('完成')" />
         </el-steps>
 
         <div class="import-step-content">
@@ -7495,13 +7360,10 @@ onBeforeUnmount(() => {
               :on-remove="handleFileChange"
             >
               <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-              <div class="el-upload__text">
-                将模型文件拖到这里，或 <em>选择文件</em>
+              <div class="el-upload__text"> {{ t("将模型文件拖到这里，或") }} <em>{{ t("选择文件") }}</em>
               </div>
               <template #tip>
-                <div class="el-upload__tip">
-                  不需要先选择功能。把同一下载页中的相关文件一次选中，系统会自动识别用途。
-                </div>
+                <div class="el-upload__tip"> {{ t("不需要先选择功能。把同一下载页中的相关文件一次选中，系统会自动识别用途。") }} </div>
               </template>
             </el-upload>
             <div
@@ -7516,29 +7378,29 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div v-if="validationRunning" class="demo-file-option">
-              <span>{{ importStatus }}</span>
+              <span>{{ t(importStatus) }}</span>
             </div>
           </section>
 
           <section v-else-if="importStep === 1" class="validation-step">
             <div class="file-summary">
-              <div class="file-type">{{ importMetadata.isImageImport ? '图片' : '主要' }}</div>
+              <div class="file-type">{{ importMetadata.isImageImport ? t("图片") : t("主要") }}</div>
               <div>
                 <strong>{{ importMetadata.fileName }}</strong>
                 <span>
                   {{ importMetadata.size }} ·
                   {{
                     importMetadata.modelFileCount > 1
-                      ? `${importMetadata.modelFileCount} 个主要模型分片`
+                      ? t("{0} 个主要模型分片", [importMetadata.modelFileCount])
                       : importMetadata.isVisionImport
-                      ? '主要模型文件'
+                      ? t("主要模型文件")
                       : importMetadata.isImageImport
-                        ? `${importMetadata.fileCount} 个文件 · 自动组合`
-                        : '聊天模型文件'
+                        ? t("{0} 个文件 · 自动组合", [importMetadata.fileCount])
+                        : t("聊天模型文件")
                   }}
                 </span>
               </div>
-              <el-tag type="success" effect="plain">文件正常</el-tag>
+              <el-tag type="success" effect="plain">{{ t("文件正常") }}</el-tag>
             </div>
 
             <div
@@ -7555,7 +7417,7 @@ onBeforeUnmount(() => {
                   <strong>{{ file.name }}</strong>
                   <span>{{ getImageImportFileRole(file) }} · {{ formatFileSize(file.size) }}</span>
                 </div>
-                <el-tag type="success" effect="plain">已经识别</el-tag>
+                <el-tag type="success" effect="plain">{{ t("已经识别") }}</el-tag>
               </div>
             </div>
 
@@ -7568,12 +7430,12 @@ onBeforeUnmount(() => {
                 :key="file.name"
                 class="file-summary projector-file-summary"
               >
-                <div class="file-type">分片</div>
+                <div class="file-type">{{ t("分片") }}</div>
                 <div>
                   <strong>{{ file.name }}</strong>
-                  <span>主要模型分片 · {{ formatFileSize(file.size) }}</span>
+                  <span>{{ t("主要模型分片 ·") }} {{ formatFileSize(file.size) }}</span>
                 </div>
-                <el-tag type="success" effect="plain">已经识别</el-tag>
+                <el-tag type="success" effect="plain">{{ t("已经识别") }}</el-tag>
               </div>
             </div>
 
@@ -7581,60 +7443,58 @@ onBeforeUnmount(() => {
               v-if="importMetadata.isVisionImport"
               class="file-summary projector-file-summary"
             >
-              <div class="file-type">图片</div>
+              <div class="file-type">{{ t("图片") }}</div>
               <div>
                 <strong>{{ importMetadata.projectorFileName }}</strong>
-                <span>图片识别配套文件 · 将与主要文件一起安装</span>
+                <span>{{ t("图片识别配套文件 · 将与主要文件一起安装") }}</span>
               </div>
-              <el-tag type="success" effect="plain">已经配对</el-tag>
+              <el-tag type="success" effect="plain">{{ t("已经配对") }}</el-tag>
             </div>
 
             <div class="validation-grid">
               <div>
-                <span>{{ importMetadata.isImageImport ? '文件组合' : '主要文件' }}</span>
-                <strong>检查通过</strong>
+                <span>{{ importMetadata.isImageImport ? t("文件组合") : t("主要文件") }}</span>
+                <strong>{{ t("检查通过") }}</strong>
               </div>
               <div>
-                <span>{{ importMetadata.isImageImport ? '自动用途' : '图片识别' }}</span>
+                <span>{{ importMetadata.isImageImport ? t("自动用途") : t("图片识别") }}</span>
                 <strong>
                   {{
                     importMetadata.isImageImport
-                      ? '生成与修改图片'
+                      ? t("生成与修改图片")
                       : importMetadata.isVisionImport
-                        ? '可以使用'
-                        : '没有添加'
+                        ? t("可以使用")
+                        : t("没有添加")
                   }}
                 </strong>
               </div>
               <div>
-                <span>文件总大小</span>
+                <span>{{ t("文件总大小") }}</span>
                 <strong>{{ importMetadata.size }}</strong>
               </div>
               <div>
-                <span>检查结果</span>
+                <span>{{ t("检查结果") }}</span>
                 <strong class="success-text">
-                  <el-icon><Check /></el-icon>
-                  可以安装
-                </strong>
+                  <el-icon><Check /></el-icon> {{ t("可以安装") }} </strong>
               </div>
             </div>
 
             <el-form v-if="!importMetadata.isImageImport" label-position="top">
-              <el-form-item label="显示名称">
+              <el-form-item :label="t('显示名称')">
                 <el-input v-model="importName" maxlength="60" />
               </el-form-item>
-              <el-form-item label="主要文件校验码">
+              <el-form-item :label="t('主要文件校验码')">
                 <el-input
-                  :model-value="importSha ? `sha256:${importSha}` : '导入时边写入边校验，避免提前重复读取大文件'"
+                  :model-value="importSha ? `sha256:${importSha}` : t('导入时边写入边校验，避免提前重复读取大文件')"
                   readonly
                 />
               </el-form-item>
               <el-form-item
                 v-if="importMetadata.isVisionImport"
-                label="图片识别文件校验码"
+                :label="t('图片识别文件校验码')"
               >
                 <el-input
-                  :model-value="importProjectorSha ? `sha256:${importProjectorSha}` : '导入时自动计算并校验'"
+                  :model-value="importProjectorSha ? `sha256:${importProjectorSha}` : t('导入时自动计算并校验')"
                   readonly
                 />
               </el-form-item>
@@ -7644,31 +7504,31 @@ onBeforeUnmount(() => {
           <section v-else-if="importStep === 2" class="create-step">
             <div v-if="!importRunning && importProgress === 0" class="ready-import">
               <div class="ready-icon"><el-icon><Cpu /></el-icon></div>
-              <h3>准备安装模型</h3>
+              <h3>{{ t("准备安装模型") }}</h3>
               <p>
                 {{
                   importMetadata.isImageImport
-                    ? 'ShotAI 将自动组合这些文件并启动图片服务，同时检查生成与修改功能。'
-                    : 'ShotAI 将安装所选文件，并检查模型是否可以正常回答。'
+                    ? t("ShotAI 将自动组合这些文件并启动图片服务，同时检查生成与修改功能。")
+                    : t("ShotAI 将安装所选文件，并检查模型是否可以正常回答。")
                 }}
                 {{
                   importMetadata.isVisionImport
-                    ? '同时检查图片识别功能。'
+                    ? t("同时检查图片识别功能。")
                     : ''
                 }}
               </p>
               <div class="import-plan">
-                <span><el-icon><Check /></el-icon> 不发送到网络</span>
-                <span><el-icon><Check /></el-icon> 只在这台电脑处理</span>
-                <span><el-icon><Check /></el-icon> 一次读取并完成校验</span>
-                <span><el-icon><Check /></el-icon> 重复文件自动复用</span>
+                <span><el-icon><Check /></el-icon> {{ t("不发送到网络") }}</span>
+                <span><el-icon><Check /></el-icon> {{ t("只在这台电脑处理") }}</span>
+                <span><el-icon><Check /></el-icon> {{ t("一次读取并完成校验") }}</span>
+                <span><el-icon><Check /></el-icon> {{ t("重复文件自动复用") }}</span>
               </div>
             </div>
             <div v-else class="progress-state">
               <div class="progress-value">{{ importProgress }}%</div>
-              <h3>{{ importFailureDetail ? '模型导入未完成' : importProgress < 100 ? '正在导入模型' : '正在完成检查' }}</h3>
+              <h3>{{ importFailureDetail ? t("模型导入未完成") : importProgress < 100 ? t("正在导入模型") : t("正在完成检查") }}</h3>
               <p>
-                {{ importStatus }}
+                {{ t(importStatus) }}
               </p>
               <el-progress
                 :percentage="importProgress"
@@ -7685,10 +7545,10 @@ onBeforeUnmount(() => {
 
           <section v-else class="complete-step">
             <div class="complete-icon"><el-icon><CircleCheck /></el-icon></div>
-            <h3>{{ importRuntimePending ? '模型文件已导入' : '模型导入成功' }}</h3>
-            <p v-if="importRuntimePending">{{ importStatus }}</p>
+            <h3>{{ importRuntimePending ? t("模型文件已导入") : t("模型导入成功") }}</h3>
+            <p v-if="importRuntimePending">{{ t(importStatus) }}</p>
             <p v-else>
-              {{ importName }} 已检查完成，现在可以{{ importMetadata.isImageImport ? '生成或修改图片' : '开始对话' }}。
+              {{ importName }} {{ t("已检查完成，现在可以") }}{{ importMetadata.isImageImport ? t("生成或修改图片") : t("开始对话") }}。
             </p>
             <div class="complete-model">
               <span>AI</span>
@@ -7702,7 +7562,7 @@ onBeforeUnmount(() => {
                 :type="importRuntimePending ? 'warning' : 'success'"
                 effect="plain"
               >
-                {{ importRuntimePending ? '待安装运行组件' : '可用' }}
+                {{ importRuntimePending ? t("待安装运行组件") : t("可用") }}
               </el-tag>
             </div>
           </section>
@@ -7713,37 +7573,31 @@ onBeforeUnmount(() => {
             <el-button
               v-if="importStep > 0 && importStep < 3 && !importRunning"
               @click="importStep -= 1"
-            >
-              上一步
-            </el-button>
+            > {{ t("上一步") }} </el-button>
             <span class="footer-spacer"></span>
             <el-button
               v-if="importStep < 3 && !importRunning && !validationRunning"
               @click="importDialogOpen = false"
-            >
-              取消
-            </el-button>
+            > {{ t("取消") }} </el-button>
             <el-button
               v-if="importStep < 2"
               type="primary"
               :loading="validationRunning"
               @click="nextImportStep"
             >
-              {{ validationRunning ? '正在校验' : '下一步' }}
+              {{ validationRunning ? t("正在校验") : t("下一步") }}
             </el-button>
             <el-button
               v-else-if="importStep === 2 && !importRunning && !importFailureDetail"
               type="primary"
               @click="startImport"
-            >
-              开始导入
-            </el-button>
+            > {{ t("开始导入") }} </el-button>
             <el-button
               v-else-if="importStep === 3"
               type="primary"
               @click="finishImport"
             >
-              {{ importMetadata.isImageImport ? '完成' : '使用此模型' }}
+              {{ importMetadata.isImageImport ? t("完成") : t("使用此模型") }}
             </el-button>
           </div>
         </template>

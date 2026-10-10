@@ -40,7 +40,7 @@ const browser = await chromium.launch({
 })
 
 try {
-  const page = await browser.newPage({ viewport: { width: 1360, height: 900 } })
+  const page = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1360, height: 900 } })
   await page.route('**/shotai/system', (route) =>
     route.fulfill({
       contentType: 'application/json',

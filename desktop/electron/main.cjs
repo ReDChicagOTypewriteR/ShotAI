@@ -26,6 +26,10 @@ const { basename, dirname, extname, join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
 
 const APP_NAME = 'ShotAI'
+function nativeText(chinese, english) {
+  const { systemLocale } = require('./locale.cjs')
+  return systemLocale(process.env, app.getLocale()) === 'zh-CN' ? chinese : english
+}
 const DEFAULT_PORT = 9090
 const CONTROL_TIMEOUT_MS = 30_000
 
@@ -704,14 +708,16 @@ function lanAddresses() {
 }
 
 function createTray() {
+  const { systemLocale } = require('./locale.cjs')
+  const chinese = systemLocale(process.env, app.getLocale()) === 'zh-CN'
   const image = nativeImage.createFromPath(iconPath()).resize({ width: 20, height: 20 })
   tray = new Tray(image)
-  tray.setToolTip(`${APP_NAME} · 端口 ${config.port}`)
+  tray.setToolTip(`${APP_NAME} · ${chinese ? '端口' : 'Port'} ${config.port}`)
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: '打开 ShotAI', click: showWindow },
+      { label: chinese ? '打开 ShotAI' : 'Open ShotAI', click: showWindow },
       {
-        label: '复制内网地址',
+        label: chinese ? '复制内网地址' : 'Copy LAN address',
         click: () => {
           const { clipboard } = require('electron')
           clipboard.writeText(lanAddresses()[0] || `http://127.0.0.1:${config.port}`)
@@ -719,7 +725,7 @@ function createTray() {
       },
       { type: 'separator' },
       {
-        label: '退出 ShotAI',
+        label: chinese ? '退出 ShotAI' : 'Quit ShotAI',
         click: () => {
           app.quit()
         },
@@ -762,12 +768,12 @@ async function confirmQuitDuringModelImport() {
     if (!operation) return
     const result = await dialog.showMessageBox(mainWindow, {
       type: 'warning',
-      title: '模型仍在导入',
-      message: '模型文件正在安装或转换，现在退出会导致导入失败。',
+      title: nativeText('模型仍在导入', 'Model import in progress'),
+      message: nativeText('模型文件正在安装或转换，现在退出会导致导入失败。', 'Model files are being imported or converted. Quitting now will interrupt the import.'),
       detail: operation.status
-        ? `当前进度：${operation.status}\n\n建议继续等待，直到界面显示模型创建成功。`
-        : '建议继续等待，直到界面显示模型创建成功。',
-      buttons: ['继续导入', '仍然退出'],
+        ? `${nativeText('当前进度：', 'Current progress: ')}${operation.status}\n\n${nativeText('建议继续等待，直到界面显示模型创建成功。', 'Wait until the interface confirms the model was created.')}`
+        : nativeText('建议继续等待，直到界面显示模型创建成功。', 'Wait until the interface confirms the model was created.'),
+      buttons: [nativeText('继续导入', 'Continue import'), nativeText('仍然退出', 'Quit anyway')],
       defaultId: 0,
       cancelId: 0,
       noLink: true,
@@ -788,10 +794,10 @@ app.on('second-instance', (_event, _commandLine, _workingDirectory, additionalDa
   if (requestedVersion && requestedVersion !== app.getVersion()) {
     void dialog.showMessageBox(mainWindow, {
       type: 'warning',
-      title: '检测到另一个 ShotAI 版本',
-      message: `当前运行的是 ${app.getVersion()}，刚刚启动的是 ${requestedVersion}。`,
-      detail: '请从系统托盘退出当前版本，再重新打开新版，避免网页和主机服务混用。',
-      buttons: ['知道了'],
+      title: nativeText('检测到另一个 ShotAI 版本', 'Another ShotAI version detected'),
+      message: nativeText(`当前运行的是 ${app.getVersion()}，刚刚启动的是 ${requestedVersion}。`, `Version ${app.getVersion()} is running; you just started ${requestedVersion}.`),
+      detail: nativeText('请从系统托盘退出当前版本，再重新打开新版，避免网页和主机服务混用。', 'Quit the running version from the system tray, then open the new version to avoid mixing the interface and host service.'),
+      buttons: [nativeText('知道了', 'OK')],
     })
   }
 })

@@ -6,9 +6,10 @@ const browser = await chromium.launch({
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
 })
 let capturedChat
+const appUrl = process.env.SHOTAI_TEST_URL || 'http://127.0.0.1:5173'
 
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } })
+  const page = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1440, height: 960 } })
   await page.route('**/ollama/api/**', async (route) => {
     const request = route.request()
     const pathname = new URL(request.url()).pathname
@@ -90,7 +91,7 @@ try {
     })
   })
 
-  await page.goto('http://127.0.0.1:5173/#workbench', {
+  await page.goto(`${appUrl}/#workbench`, {
     waitUntil: 'networkidle',
     timeout: 20_000,
   })

@@ -7,7 +7,7 @@ const browser = await chromium.launch({
 })
 
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } })
+  const page = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1440, height: 960 } })
   let abortedChatRequests = 0
   let chatRequestCount = 0
 

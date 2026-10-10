@@ -83,7 +83,7 @@ async function downloadArtifact(page, namePattern) {
 let routeCount = 0
 
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } })
+  const page = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1440, height: 960 } })
   await page.route('**/ollama/api/**', async (route) => {
     const request = route.request()
     const pathname = new URL(request.url()).pathname
