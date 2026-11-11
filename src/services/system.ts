@@ -79,7 +79,7 @@ export interface MonitorSnapshot {
       devices?: Array<{
         index: number
         uuid?: string
-        processes?: Array<{ gpuId: string; pid: number; name: string; memoryBytes: number | null }> | null
+        processes?: Array<{ gpuId: string; pid: number; name: string; memoryBytes: number | null; runtimeId?: string }> | null
         name: string
         usagePercent: number
         memoryUsedBytes: number
@@ -88,7 +88,7 @@ export interface MonitorSnapshot {
       }>
     }
     inference: {
-      instances?: Array<{ id: string; gpuId: string; pid?: number; online: boolean; models: Array<{ name?: string; model?: string; size_vram?: number }> }>
+      instances?: Array<{ id: string; gpuId: string; pid?: number; online: boolean; observedGpuIds?: string[]; placement?: string; models: Array<{ name?: string; model?: string; size_vram?: number }> }>
       state: 'idle' | 'importing' | 'running' | 'unavailable'
       backend: 'idle' | 'gpu' | 'mixed' | 'cpu' | 'unknown'
       model: string

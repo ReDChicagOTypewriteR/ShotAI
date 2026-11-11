@@ -41,7 +41,7 @@ import { RuntimeMetadataCache } from './runtime-metadata.mjs'
 import { runtimeDescriptors, runtimeParallelLimit } from './runtime-pool.mjs'
 import { InferenceOutcome } from './inference-outcome.mjs'
 import diagnostics from './runtime-diagnostics.cjs'
-import { gpuProcesses } from './runtime-gpu.mjs'
+import { gpuProcesses, observeGpuProcesses } from './runtime-gpu.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const projectDirectory =
@@ -189,13 +189,17 @@ async function metadataFromAvailable(path, body, refresh = false) {
 }
 
 async function loadedAcrossRuntimes() {
-  const snapshots = await Promise.all(runtimeInstances.map(async instance => {
+  const [snapshots, gpu] = await Promise.all([Promise.all(runtimeInstances.map(async instance => {
     try {
       const ps = await runtimeMetadata.read(instance.url, '/api/ps')
       return { id: instance.id, gpuId: instance.gpuId || '', pid: instance.pid || null, online: true,
         models: (ps.models || []).map(model => ({ ...model, runtimeId: instance.id, gpuId: instance.gpuId || '' })) }
     } catch { return { id: instance.id, gpuId: instance.gpuId || '', pid: instance.pid || null, online: false, models: [] } }
-  }))
+  })), readGpuUsage()])
+  for (const instance of snapshots) {
+    instance.observedGpuIds = (gpu?.devices || []).filter(device => device.processes?.some(process => process.runtimeId === instance.id)).map(device => device.uuid)
+    instance.placement = instance.observedGpuIds.length > 1 ? 'split-gpu' : instance.observedGpuIds.length === 1 ? 'single-gpu' : 'unconfirmed'
+  }
   return { instances: snapshots, models: snapshots.flatMap(snapshot => snapshot.models) }
 }
 
@@ -232,7 +236,10 @@ const scheduler = new InferenceScheduler({ maxClients: maximumActiveUsers, ceili
         }
         return { id: instance.id, online, gpuTotal: card?.memoryTotalBytes || 0, gpuFree: card ? card.memoryTotalBytes - card.memoryUsedBytes : 0,
           ramTotal: totalmem(), ramFree: freemem(),
-          loadedVram: card ? Math.min(card.memoryUsedBytes, loaded.reduce((sum, model) => sum + Number(model.size_vram || 0), 0)) : 0,
+          // Never credit memory from a different process/card as reclaimable.
+          loadedVram: card ? instance.gpuId
+            ? Math.min(card.memoryUsedBytes, loaded.reduce((sum, model) => sum + Number(model.size_vram || 0), 0))
+            : (card.processes || []).filter(process => process.runtimeId === instance.id).reduce((sum, process) => sum + (process.memoryBytes || 0), 0) : 0,
           loadedRam: loaded.reduce((sum, model) => sum + Math.max(0, Number(model.size || 0) - Number(model.size_vram || 0)), 0),
           loadedModels: loaded.map(loadedModelStatus), parallelLimit: instance.parallel, modelParallelLimits, singleModel: true,
           residentOptions: residentOptions.get(instance.id) }
@@ -445,8 +452,8 @@ function readGpuUsage() {
         if (!value) { gpuSnapshot = { checkedAt: Date.now(), value }; resolveGpu(value); return }
         execFile(process.platform === 'win32' ? 'nvidia-smi.exe' : 'nvidia-smi',
           ['--query-compute-apps=gpu_uuid,pid,used_memory,process_name', '--format=csv,noheader,nounits'],
-          { windowsHide: true, timeout: 2500 }, (processError, processOutput) => {
-            const processes = processError ? null : gpuProcesses(processOutput)
+          { windowsHide: true, timeout: 2500 }, async (processError, processOutput) => {
+            const processes = processError ? null : await observeGpuProcesses(gpuProcesses(processOutput), runtimeInstances)
             for (const device of value.devices) device.processes = processes?.filter(process => process.gpuId === device.uuid) ?? null
             gpuSnapshot = { checkedAt: Date.now(), value }
             resolveGpu(value)

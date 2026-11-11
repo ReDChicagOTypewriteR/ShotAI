@@ -193,7 +193,7 @@ try {
     cleanupSurvivesDisconnect: true, maintenanceBlocksInference: true, taskCorrelation: true,
     sameClientPreparingQueue: true, cancelledQueueReused: true, repeatedRequests: true, upstreamCrashReleased: true }))
 } finally {
-  child.kill('SIGTERM'); await once(child, 'exit')
+  if (child.exitCode === null && child.signalCode === null) { child.kill('SIGTERM'); await once(child, 'exit') }
   upstream.closeAllConnections(); await new Promise((resolve) => upstream.close(resolve))
   await rm(dir, { recursive: true, force: true })
 }

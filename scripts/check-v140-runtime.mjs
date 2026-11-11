@@ -10,13 +10,17 @@ import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { InferenceOutcome } from './inference-outcome.mjs'
-import { gpuProcesses } from './runtime-gpu.mjs'
+import { gpuProcesses, attributeProcesses } from './runtime-gpu.mjs'
 
 assert.deepEqual(gpuProcesses('GPU-a, 123, 900, /runtime/llama-server\nGPU-b, 124, N/A, ollama.exe'), [
   { gpuId: 'GPU-a', pid: 123, name: '/runtime/llama-server', memoryBytes: 900 * 1024 ** 2 },
   { gpuId: 'GPU-b', pid: 124, name: 'ollama.exe', memoryBytes: null },
 ])
 assert.deepEqual(gpuProcesses('N/A, N/A, N/A, N/A'), [])
+const attributed = attributeProcesses([{ pid: 101, gpuId: 'GPU-a' }, { pid: 101, gpuId: 'GPU-b' }, { pid: 201, gpuId: 'GPU-b' }, { pid: 300, gpuId: 'GPU-a' }],
+  [{ pid: 101, parent: 100 }, { pid: 201, parent: 200 }, { pid: 300, parent: 301 }, { pid: 301, parent: 300 }],
+  [{ pid: 100, id: 'primary' }, { pid: 200, id: 'second' }])
+assert.deepEqual(attributed.map(process => process.runtimeId), ['primary', 'primary', 'second', undefined])
 
 const output = new InferenceOutcome()
 const stream = Buffer.from(`${JSON.stringify({ message: { content: '私密正文不要写入日志' } })}\n${JSON.stringify({ done: true, done_reason: 'stop', eval_count: 18, load_duration: 42 })}`)

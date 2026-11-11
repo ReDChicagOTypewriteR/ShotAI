@@ -1,5 +1,6 @@
 // Chinese source copy is the stable key; user content is never passed through this catalog.
 const en: Record<string, string> = {
+  '已观察到跨卡占用': 'Observed on multiple GPUs', '已观察到单卡占用': 'Observed on one GPU',
   '构建编号': 'Build ID', '显存用量未知': 'VRAM usage unknown', '显卡由运行时自动分配': 'GPU placement managed by runtime',
   '当前设备已有两项任务正在处理或排队，请等待完成或停止已有任务后重试': 'This device already has two tasks running or queued. Wait for a task to finish or stop it before retrying.',
   '当前服务的使用人数已达上限，请等待其他用户的任务结束后重试': 'The service has reached its user limit. Retry after another user’s tasks finish.',

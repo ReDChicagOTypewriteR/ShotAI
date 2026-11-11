@@ -7511,6 +7511,7 @@ onBeforeUnmount(() => {
                 {{ formatMonitorBytes(device.memoryUsedBytes) }} / {{ formatMonitorBytes(device.memoryTotalBytes) }}
                 <span v-for="process in device.processes || []" :key="process.pid" style="display: block">
                   PID {{ process.pid }} · {{ process.name }} · {{ process.memoryBytes === null ? t("显存用量未知") : formatMonitorBytes(process.memoryBytes) }}
+                  <span v-if="process.runtimeId"> · {{ process.runtimeId }}</span>
                 </span>
               </small>
               <small v-for="instance in monitorSnapshot.performance.inference.instances || []" :key="instance.id">
@@ -7518,6 +7519,9 @@ onBeforeUnmount(() => {
                 {{ instance.models.map(model => model.name || model.model).join(', ') || t("尚未载入对话模型") }}
                 <span v-if="instance.gpuId"> · {{ instance.gpuId }}</span>
                 <span v-else> · {{ t("显卡由运行时自动分配") }}</span>
+                <span v-if="instance.observedGpuIds?.length" style="display: block">
+                  {{ instance.placement === 'split-gpu' ? t("已观察到跨卡占用") : t("已观察到单卡占用") }} · {{ instance.observedGpuIds.join(', ') }}
+                </span>
               </small>
             </article>
             <article class="monitor-metric-card">
