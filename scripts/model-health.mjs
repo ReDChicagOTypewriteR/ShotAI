@@ -2,15 +2,16 @@ export function loadedModelStatus(model) {
   const bytes = Number(model.size) || 0
   const vram = Number(model.size_vram) || 0
   return { model: model.name || model.model || '', modelBytes: bytes, vramBytes: vram,
+    runtimeId: model.runtimeId, gpuId: model.gpuId,
     contextLength: Number(model.context_length) || 0,
     backend: vram <= 0 ? 'cpu' : vram < bytes * 0.95 ? 'mixed' : 'gpu',
     evidence: 'ollama-api-ps', loaded: true }
 }
 export async function runtimeJson(target, path, { body, signal, timeout = 5000, method } = {}) {
   const response = await fetch(new URL(path, target), { method: method || (body ? 'POST' : 'GET'),
-    headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+    headers: { 'Content-Type': 'application/json', 'X-ShotAI-Proxy': 'lan' }, body: body ? JSON.stringify(body) : undefined,
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout) })
-  if (!response.ok) throw new Error(`Runtime HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`)
+  if (!response.ok) throw Object.assign(new Error(`Runtime HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`), { status: response.status })
   const raw = await response.text()
   const result = raw ? JSON.parse(raw) : {}
   if (result.error) throw new Error(String(result.error))

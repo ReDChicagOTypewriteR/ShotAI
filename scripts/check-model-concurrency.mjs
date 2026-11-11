@@ -37,6 +37,26 @@ first.done(); await tick(); assert.equal(image.state, 'running'); assert.equal(l
 scheduler.cancel(image); await tick(); assert.equal(later.state, 'running'); later.done(); await tick()
 const never = job('never'); never.ready = false; scheduler.enqueue(never); scheduler.cancel(never); await tick()
 assert.equal(never.state, 'done'); assert.equal(scheduler.snapshot().queued, 0)
+const preparing = job('preparing')
+preparing.ready = false
+const preparingFollowup = job('preparing')
+assert.ok(scheduler.enqueue(preparing))
+assert.ok(scheduler.enqueue(preparingFollowup), 'A client can reserve its follow-up before its first task starts')
+const excess = job('preparing')
+assert.equal(scheduler.enqueue(excess), false)
+assert.equal(excess.rejectionReason, 'client-queue-full')
+await tick()
+assert.equal(preparingFollowup.state, 'queued', 'Follow-ups retain FIFO order')
+preparing.ready = true
+await scheduler.drain()
+assert.equal(preparing.state, 'running')
+assert.equal(preparingFollowup.state, 'queued')
+scheduler.cancel(preparing)
+await tick()
+assert.equal(preparingFollowup.state, 'running')
+preparingFollowup.done()
+await tick()
+assert.equal(scheduler.snapshot().activeClients, 0)
 assert.equal(loadedModelStatus({ name: 'cpu', size: 100, size_vram: 0 }).backend, 'cpu')
 assert.equal(loadedModelStatus({ name: 'mixed', size: 100, size_vram: 40 }).backend, 'mixed')
 assert.equal(loadedModelStatus({ name: 'gpu', size: 100, size_vram: 100 }).backend, 'gpu')
@@ -64,7 +84,14 @@ const upstream = createServer(async (req, res) => {
     if (req.url !== '/api/chat') assert.equal(active, 0, 'Image must not overlap text')
     active++; peak = Math.max(peak, active)
     const input = JSON.parse(body)
-    const timer = setTimeout(() => { active--; loaded = req.url === '/api/chat'; json({ message: { content: '你好' }, done: true, data: [] }) }, input.slow ? 10000 : 80)
+    if (input.crash) {
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson' })
+      res.write(`${JSON.stringify({ message: { content: '未完成' }, done: false })}\n`)
+    }
+    const timer = setTimeout(() => {
+      if (input.crash) { res.destroy(); return }
+      active--; loaded = req.url === '/api/chat'; json({ message: { content: '你好' }, done: true, data: [] })
+    }, input.slow ? 10000 : 80)
     res.once('close', () => { if (!res.writableEnded) { clearTimeout(timer); active--; aborted++ } })
     return
   }
@@ -87,6 +114,7 @@ try {
   await waitFor(async () => (await fetch(`${base}/shotai/system`)).ok)
   const responses = await Promise.all(Array.from({ length: 6 }, (_, i) => post('/ollama/api/chat', String(i), { model: 'cpu' })))
   assert.equal(responses.filter((r) => r.status === 200).length, 5); assert.equal(responses.filter((r) => r.status === 429).length, 1)
+  assert.equal((await responses.find(r => r.status === 429).json()).reason, 'active-client-limit')
   const successfulTask = responses.find(r => r.status === 200).headers.get('x-shotai-task-id')
   assert.ok(successfulTask)
   await waitFor(async () => (await (await fetch(`${base}/shotai/tasks/${successfulTask}`)).json()).task.state === 'completed')
@@ -98,6 +126,44 @@ try {
   await waitFor(async () => (await (await fetch(`${base}/shotai/system`)).json()).concurrency.queued === 1)
   queuedAbort.abort(); await queued
   controller.abort(); await slow; await waitFor(() => active === 0 && aborted > 0)
+  const blockerController = new AbortController()
+  const blocker = post('/ollama/api/chat', 'blocker', { model: 'cpu', slow: true }, blockerController.signal).catch(error => error)
+  await waitFor(() => active === 1)
+  const waitingControllers = [new AbortController(), new AbortController()]
+  const waiting = waitingControllers.map(controller => post('/ollama/api/chat', 'same-browser', { model: 'cpu' }, controller.signal).catch(error => error))
+  await waitFor(async () => (await (await fetch(`${base}/shotai/system`)).json()).concurrency.queued === 2)
+  const rejected = await post('/ollama/api/chat', 'same-browser', { model: 'cpu' })
+  assert.equal(rejected.status, 429)
+  const rejection = await rejected.json()
+  assert.equal(rejection.reason, 'client-queue-full')
+  assert.match(rejection.error, /两项任务/)
+  waitingControllers[0].abort()
+  await waiting[0]
+  await waitFor(async () => (await (await fetch(`${base}/shotai/system`)).json()).concurrency.queued === 1)
+  const replacement = post('/ollama/api/chat', 'same-browser', { model: 'cpu' })
+  await waitFor(async () => (await (await fetch(`${base}/shotai/system`)).json()).concurrency.queued === 2)
+  blockerController.abort()
+  await blocker
+  for (const result of await Promise.all([waiting[1], replacement])) {
+    assert.equal(result.status, 200)
+    await result.json()
+  }
+  for (let index = 0; index < 10; index++) {
+    const result = await post('/ollama/api/chat', 'same-browser', { model: 'cpu' })
+    assert.equal(result.status, 200)
+    await result.json()
+  }
+  const crashed = await post('/ollama/api/chat', 'same-browser', { model: 'cpu', crash: true })
+  const crashedTask = crashed.headers.get('x-shotai-task-id')
+  await assert.rejects(crashed.text())
+  await waitFor(async () => (await (await fetch(`${base}/shotai/tasks/${crashedTask}`)).json()).task.state === 'failed')
+  await waitFor(async () => {
+    const load = (await (await fetch(`${base}/shotai/system`)).json()).concurrency
+    return load.running === 0 && load.queued === 0 && load.activeClients === 0
+  })
+  const recovered = await post('/ollama/api/chat', 'same-browser', { model: 'cpu' })
+  assert.equal(recovered.status, 200)
+  await recovered.json()
   const events = await readFile(join(dir, 'logs', 'tasks.jsonl'), 'utf8')
   assert.match(events, /cancel-requested/)
   assert.match(events, /connection-closed/)
@@ -124,7 +190,8 @@ try {
   assert.equal(maintenanceModel, false)
   console.log(JSON.stringify({ actualLoad: true, cpuMixedGpu: true, healthProbeAndLog: true, fiveClients: true, fairQueue: true,
     dynamicCapacity: true, imageExclusive: true, unloadBeforeImage: true, stoppedTasksReleased: true, unknownSerialized: true,
-    cleanupSurvivesDisconnect: true, maintenanceBlocksInference: true, taskCorrelation: true }))
+    cleanupSurvivesDisconnect: true, maintenanceBlocksInference: true, taskCorrelation: true,
+    sameClientPreparingQueue: true, cancelledQueueReused: true, repeatedRequests: true, upstreamCrashReleased: true }))
 } finally {
   child.kill('SIGTERM'); await once(child, 'exit')
   upstream.closeAllConnections(); await new Promise((resolve) => upstream.close(resolve))

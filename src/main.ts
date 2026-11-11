@@ -7,6 +7,7 @@ import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
 import 'vue-element-plus-x/styles/index.css'
 import './styles.css'
+import './interaction.css'
 
 const app = createApp(App)
 

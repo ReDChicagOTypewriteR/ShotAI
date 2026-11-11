@@ -10,8 +10,32 @@ export interface OfficeSource {
 }
 export type OfficeRoute =
   | { action: 'chat' }
+  | { action: 'task' }
   | { action: 'clarify'; question: string }
   | { action: 'create' | 'edit'; kind: OfficeKind; sourceId?: string }
+
+const fileCreatePrefix = /^(?:请\s*)?(?:帮我\s*|给我\s*)?(?:生成|创建|制作|写|导出)/i
+
+export function explicitStandaloneFileKind(request: string): OfficeKind | undefined {
+  const text = request.trim()
+  if (!fileCreatePrefix.test(text)) return
+  if (/(?:刚才|上一[份轮次]|上面|原文件|附件|上传|根据|依据|基于|汇总|对比|逐个|分别|每份|修改|改成|不要|无需|不用|脚本|示例代码|操作步骤)/i.test(text)) return
+  const kinds: OfficeKind[] = []
+  if (/\b(?:word|docx)\b/i.test(text)) kinds.push('word')
+  if (/\b(?:excel|xlsx)\b/i.test(text)) kinds.push('excel')
+  if (/\bpdf\b/i.test(text)) kinds.push('pdf')
+  if (kinds.length === 1 && !/(?:[两二三四五六七八九十多]|\b(?:[2-9]|\d{2,}))\s*(?:份|个)/.test(text)) return kinds[0]
+}
+
+export function standaloneFileTopic(request: string): string {
+  const topic = request.trim()
+    .replace(fileCreatePrefix, '')
+    .replace(/^\s*(?:一|1)\s*(?:个|份|篇)\s*/, '')
+    .replace(/^\s*(?:word|docx|pdf|excel|xlsx)\b\s*(?:文档|文件|表格)?\s*[,，:：]?\s*/i, '')
+    .replace(/\s*(?:的\s*)?\b(?:word|docx|pdf|excel|xlsx)\b\s*(?:文档|文件|表格)?[。！!]?\s*$/i, '')
+    .trim()
+  return topic || request
+}
 
 export function createOfficeRouteMessages(
   history: OllamaChatMessage[],
@@ -34,7 +58,8 @@ export function createOfficeRouteMessages(
       role: 'system',
       content: [
         '你是办公对话的任务调度器，依据用户最新请求、上下文和文件决定下一步，只返回 JSON。',
-        '普通问答、解释、总结、分析数据、讨论如何操作，返回 {"action":"chat"}，不能因为上传文件就自动生成文件。',
+        '普通问答、解释概念、讨论如何操作，返回 {"action":"chat"}，不能因为上传文件就自动生成文件。',
+        '需要读取具体文件、全文总结、计算表格、核对多个来源、局部修改原文或交付多份文件时，优先返回 {"action":"task"}。只在实际需要处理资料时选 task，问候和一般知识问答仍选 chat。',
         '用户要求实际生成可下载的表格、Word、PDF，返回 {"action":"create","kind":"excel|word|pdf"}。',
         '用户要求修改已有文件并输出结果，返回 {"action":"edit","kind":"excel|word|pdf","sourceId":"源文件的准确ID"}。',
         '可参考上一轮输出和上传文件解析“这个”“再改一下”等指代。kind 表示输出类型，跨格式生成新文档使用 create。',
@@ -58,22 +83,24 @@ export function parseOfficeRoute(raw: string, sources: OfficeSource[]): OfficeRo
   try {
     value = JSON.parse(cleaned)
   } catch {
-    throw new Error('模型未能判断文件处理要求，请重新描述需要分析、修改或输出的内容')
+    // Routing is an optional aid, never a prerequisite for ordinary chat.
+    return { action: 'chat' }
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('模型返回的文件处理选择无效')
+    return { action: 'chat' }
   }
   const route = value as Record<string, unknown>
   if (route.action === 'chat') return { action: 'chat' }
+  if (route.action === 'task') return { action: 'task' }
   if (route.action === 'clarify' && typeof route.question === 'string' && route.question.trim()) {
     return { action: 'clarify', question: route.question.trim().slice(0, 400) }
   }
   if (!['create', 'edit'].includes(String(route.action)) || !['excel', 'word', 'pdf'].includes(String(route.kind))) {
-    throw new Error('模型选择了不支持的文件处理方式')
+    return { action: 'chat' }
   }
   const sourceId = typeof route.sourceId === 'string' && route.sourceId ? route.sourceId : undefined
   const source = sources.find((item) => item.id === sourceId)
-  if (sourceId && !source) throw new Error('模型指定的源文件不存在，请明确文件名称')
+  if (sourceId && !source) return { action: 'clarify', question: '你希望使用哪份文件？请指定文件名称，或重新上传原文件。' }
   if (route.action === 'edit' && (!source || !source.available)) {
     return { action: 'clarify', question: '请上传需要修改的原文件，我会在保留原件的基础上输出修改后的副本。' }
   }
@@ -81,6 +108,12 @@ export function parseOfficeRoute(raw: string, sources: OfficeSource[]): OfficeRo
     return { action: 'clarify', question: '请上传需要修改的 Excel 或 CSV 文件；如果希望依据文档新建表格，请说明。' }
   }
   return { action: route.action as 'create' | 'edit', kind: route.kind as OfficeKind, sourceId }
+}
+
+export const officeRouteSchema = {
+  type: 'object', properties: { action: { enum: ['chat', 'task', 'clarify', 'create', 'edit'] },
+    kind: { enum: ['excel', 'word', 'pdf'] }, sourceId: { type: 'string' }, question: { type: 'string' } },
+  required: ['action'], additionalProperties: false,
 }
 
 export function createOfficeContext(sources: OfficeSource[]) {

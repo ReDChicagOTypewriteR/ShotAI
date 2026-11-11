@@ -1,3 +1,4 @@
+import { excelOperationSchema, validateSchema } from './taskTools'
 export type ExcelSkillMode = 'create' | 'edit'
 
 export interface ExcelWorkbookPreview {
@@ -22,6 +23,24 @@ export interface ExcelSkillResult {
   mimeType: string
   blob: Blob
   summary: string
+}
+
+export function createStandardExcelPlan(topic: string): ExcelSkillPlan | undefined {
+  if (!/^(?:九九|99|9\s*[×x*]\s*9)\s*乘法(?:口诀)?表[。！!]?$/i.test(topic)) return
+
+  const rows = Array.from({ length: 9 }, (_, row) =>
+    Array.from({ length: row + 1 }, (_, column) => {
+      const a = column + 1
+      const b = row + 1
+      return `${a}×${b}=${a * b}`
+    }),
+  )
+  return {
+    mode: 'create',
+    fileName: '九九乘法表.xlsx',
+    summary: '已生成包含 45 条口诀的九九乘法表。',
+    sheets: [{ name: '九九乘法表', rows }],
+  }
 }
 
 type ExcelCellValue = string | number | boolean | null
@@ -108,7 +127,7 @@ function cellDisplayValue(cell: { v?: unknown; f?: string; w?: string }) {
 
 export function validateExcelSkillSourceFile(file: File) {
   const extension = file.name.split('.').pop()?.toLowerCase()
-  if (!['xlsx', 'xls', 'csv'].includes(extension || '')) {
+  if (!['xlsx', 'xls', 'xlsm', 'csv'].includes(extension || '')) {
     throw new Error('表格处理目前支持 .xlsx、.xls 和 .csv 文件')
   }
   if (!file.size) throw new Error('Excel 文件为空，无法处理')
@@ -256,6 +275,21 @@ export function parseExcelSkillPlan(
   if (expectedMode === 'edit' && !Array.isArray(parsed.operations)) {
     throw new Error('模型没有生成 Excel 修改操作')
   }
+  if (expectedMode === 'edit') {
+    const operations = parsed.operations as unknown[]
+    if (!operations.length || operations.length > 200) throw new Error('修改操作数量必须为 1–200')
+    operations.forEach(operation => validateSchema(operation, excelOperationSchema))
+  } else {
+    const sheets = parsed.sheets as unknown[]
+    if (!sheets.length || sheets.length > 32) throw new Error('工作表数量必须为 1–32')
+    for (const sheet of sheets) {
+      if (!isRecord(sheet) || typeof sheet.name !== 'string') throw new Error('工作表结构无效')
+      validateSchema(sheet.rows, { type: 'array', maxItems: 100000, items: { type: 'array', maxItems: 256, items: { type: ['string', 'number', 'boolean', 'null'] } } })
+    }
+  }
+  const names = expectedMode === 'create' ? (parsed.sheets as Array<{ name: string }>).map(sheet => sheet.name)
+    : (parsed.operations as Array<{ sheet: string; type: string; newName?: string }>).flatMap(op => [op.sheet, ...(op.type === 'rename_sheet' ? [op.newName!] : [])])
+  if (names.some(name => !name || name !== name.trim() || name.length > 31 || /[\\/?*\[\]:]/.test(name))) throw new Error('工作表名必须为 1–31 个字符，且不能包含无效字符。')
   return parsed as unknown as ExcelSkillPlan
 }
 
@@ -330,9 +364,8 @@ export async function executeExcelSkillPlan(
         const cell = String(operation.cell || '').toUpperCase()
         if (!isCellAddress(cell)) throw new Error(`单元格地址无效：${cell}`)
         const sheet = requireSheet(workbook, sheetName)
-        XLSX.utils.sheet_add_aoa(sheet, [[operation.value ?? null]], {
-          origin: cell,
-        })
+        if (operation.value === null) delete sheet[cell]
+        else XLSX.utils.sheet_add_aoa(sheet, [[operation.value]], { origin: cell })
       } else if (type === 'set_formula') {
         const cell = String(operation.cell || '').toUpperCase()
         if (!isCellAddress(cell)) throw new Error(`单元格地址无效：${cell}`)
@@ -350,9 +383,13 @@ export async function executeExcelSkillPlan(
       } else if (type === 'set_range') {
         const startCell = String(operation.startCell || '').toUpperCase()
         if (!isCellAddress(startCell)) throw new Error(`起始单元格无效：${startCell}`)
+        const rangeValues = normalizeRows(operation.values)
+        const start = XLSX.utils.decode_cell(startCell)
+        const sheet = requireSheet(workbook, sheetName)
+        rangeValues.forEach((row, r) => row.forEach((value, c) => { if (value === null) delete sheet[XLSX.utils.encode_cell({ r: start.r + r, c: start.c + c })] }))
         XLSX.utils.sheet_add_aoa(
           requireSheet(workbook, sheetName),
-          normalizeRows(operation.values),
+          rangeValues,
           { origin: startCell },
         )
       } else if (type === 'append_rows') {

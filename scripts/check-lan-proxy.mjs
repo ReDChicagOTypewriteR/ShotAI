@@ -59,6 +59,12 @@ const mockOllama = createServer(async (request, response) => {
     return
   }
 
+  if (request.method === 'GET' && request.url === '/api/ps') {
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ models: [] }))
+    return
+  }
+
   response.writeHead(404)
   response.end()
 })

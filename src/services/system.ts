@@ -1,5 +1,6 @@
 export interface ShotAISystemInfo {
   version: string
+  buildId?: string
   apiVersion: number
   platform: string
   isHost: boolean
@@ -77,6 +78,8 @@ export interface MonitorSnapshot {
       temperatureCelsius: number
       devices?: Array<{
         index: number
+        uuid?: string
+        processes?: Array<{ gpuId: string; pid: number; name: string; memoryBytes: number | null }> | null
         name: string
         usagePercent: number
         memoryUsedBytes: number
@@ -85,6 +88,7 @@ export interface MonitorSnapshot {
       }>
     }
     inference: {
+      instances?: Array<{ id: string; gpuId: string; pid?: number; online: boolean; models: Array<{ name?: string; model?: string; size_vram?: number }> }>
       state: 'idle' | 'importing' | 'running' | 'unavailable'
       backend: 'idle' | 'gpu' | 'mixed' | 'cpu' | 'unknown'
       model: string

@@ -37,6 +37,11 @@ import { ModelMaintenance, writeTaskEvent } from './model-maintenance.mjs'
 import { inspectModel, loadedModelStatus, runtimeJson } from './model-health.mjs'
 import { normalizeRemoteAddress, constantTimeEqual, parseCookies } from './request-permissions.mjs'
 import { TaskRegistry } from './task-registry.mjs'
+import { RuntimeMetadataCache } from './runtime-metadata.mjs'
+import { runtimeDescriptors, runtimeParallelLimit } from './runtime-pool.mjs'
+import { InferenceOutcome } from './inference-outcome.mjs'
+import diagnostics from './runtime-diagnostics.cjs'
+import { gpuProcesses } from './runtime-gpu.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const projectDirectory =
@@ -117,9 +122,14 @@ const runtimeLogDirectory = process.env.SHOTAI_LOG_DIRECTORY
   ? resolve(process.env.SHOTAI_LOG_DIRECTORY)
   : join(dataDirectory, 'logs')
 const releaseVersion = process.env.SHOTAI_VERSION || fileConfig.version || '1.0.0'
+const buildId = process.env.SHOTAI_BUILD_ID || 'development'
 const allowLanAdministration = fileConfig.allowLanAdministration === true
 const monitorConfig = fileConfig.monitoring || {}
 const concurrencyConfig = fileConfig.concurrency || {}
+const runtimeInstances = runtimeDescriptors(ollamaUrl,
+  JSON.parse(process.env.SHOTAI_OLLAMA_INSTANCES || '[]'),
+  Number(process.env.SHOTAI_RUNTIME_PARALLEL || 1))
+const runtimeFor = job => runtimeInstances.find(instance => instance.id === job.runtimeId) || runtimeInstances[0]
 const maximumActiveUsers = Math.max(
   1,
   Math.min(5, Number(process.env.SHOTAI_MAX_ACTIVE_USERS || concurrencyConfig.maxActiveUsers || 5) || 5),
@@ -147,6 +157,7 @@ let serverStartedAt = Date.now()
 let requestCount = 0
 let previousCpuSnapshot = null
 let gpuSnapshot = { checkedAt: 0, value: null }
+let gpuRefresh = null
 const modelOperationState = {
   activeCount: 0,
   stage: 'idle',
@@ -159,20 +170,74 @@ const modelOperationState = {
 globalThis.__shotaiModelOperationState = modelOperationState
 let schedulingResources = { checkedAt: 0, value: null }
 let resourceRefresh = null
+const runtimeMetadata = new RuntimeMetadataCache()
+const residentOptions = new Map()
+let modelMutationActive = false
+let preferredMetadataRuntime = runtimeInstances[0]
+
+async function metadataFromAvailable(path, body, refresh = false) {
+  let failure
+  const candidates = [preferredMetadataRuntime, ...runtimeInstances.filter(instance => instance !== preferredMetadataRuntime)]
+  for (const instance of candidates) {
+    try {
+      const result = await runtimeMetadata.read(instance.url, path, body, refresh)
+      preferredMetadataRuntime = instance
+      return result
+    } catch (error) { failure = error }
+  }
+  throw failure
+}
+
+async function loadedAcrossRuntimes() {
+  const snapshots = await Promise.all(runtimeInstances.map(async instance => {
+    try {
+      const ps = await runtimeMetadata.read(instance.url, '/api/ps')
+      return { id: instance.id, gpuId: instance.gpuId || '', pid: instance.pid || null, online: true,
+        models: (ps.models || []).map(model => ({ ...model, runtimeId: instance.id, gpuId: instance.gpuId || '' })) }
+    } catch { return { id: instance.id, gpuId: instance.gpuId || '', pid: instance.pid || null, online: false, models: [] } }
+  }))
+  return { instances: snapshots, models: snapshots.flatMap(snapshot => snapshot.models) }
+}
+
+async function changeModelEverywhere(path, body, method = 'POST') {
+  for (const instance of runtimeInstances) {
+    try { await runtimeJson(instance.url, path, { method, body, timeout: 30000 }) }
+    catch (error) { if (error.status !== 404) throw error }
+  }
+  runtimeMetadata.invalidate()
+  schedulingResources.checkedAt = 0
+}
 const scheduler = new InferenceScheduler({ maxClients: maximumActiveUsers, ceiling: maximumParallelInferences,
   resourceProvider: async () => {
     if (Date.now() - schedulingResources.checkedAt < 2000) return schedulingResources.value
     if (resourceRefresh) return resourceRefresh
     resourceRefresh = (async () => {
-      const [gpu, tags, ps] = await Promise.all([
-        readGpuUsage(), runtimeJson(ollamaUrl, '/api/tags').catch(() => ({ models: [] })),
-        runtimeJson(ollamaUrl, '/api/ps').catch(() => ({ models: [] })),
+      const [gpu, tags, observations] = await Promise.all([
+        readGpuUsage(), metadataFromAvailable('/api/tags').catch(() => ({ models: [] })),
+        Promise.all(runtimeInstances.map(async instance => {
+          try {
+            const [ps, version] = await Promise.all([runtimeMetadata.read(instance.url, '/api/ps'), runtimeMetadata.read(instance.url, '/api/version')])
+            return { instance, ps, version: version.version, online: true }
+          } catch { return { instance, ps: { models: [] }, version: '', online: false } }
+        })),
       ])
-      const loaded = ps.models || []
-      const card = gpu?.devices?.reduce((best, device) => !best || device.memoryTotalBytes - device.memoryUsedBytes > best.memoryTotalBytes - best.memoryUsedBytes ? device : best, null)
-      const value = { gpuTotal: card?.memoryTotalBytes || 0, gpuFree: card ? card.memoryTotalBytes - card.memoryUsedBytes : 0,
-        ramTotal: totalmem(), ramFree: freemem(), loadedVram: loaded.reduce((sum, model) => sum + Number(model.size_vram || 0), 0),
-        loadedRam: loaded.reduce((sum, model) => sum + Math.max(0, Number(model.size || 0) - Number(model.size_vram || 0)), 0), models: tags.models || [], loadedModels: loaded.map(loadedModelStatus) }
+      const instances = observations.map(({ instance, ps, version, online }) => {
+        const loaded = ps.models || []
+        const cards = instance.gpuId ? gpu?.devices?.filter(device => device.uuid === instance.gpuId || String(device.index) === instance.gpuId) : gpu?.devices
+        const card = cards?.reduce((best, device) => !best || device.memoryTotalBytes - device.memoryUsedBytes < best.memoryTotalBytes - best.memoryUsedBytes ? device : best, null)
+        const modelParallelLimits = {}
+        for (const model of tags.models || []) {
+          const limit = runtimeParallelLimit(model.details?.family, version, instance.parallel)
+          for (const name of [model.name, model.model, model.name?.replace(/:latest$/, '')].filter(Boolean)) modelParallelLimits[name] = limit
+        }
+        return { id: instance.id, online, gpuTotal: card?.memoryTotalBytes || 0, gpuFree: card ? card.memoryTotalBytes - card.memoryUsedBytes : 0,
+          ramTotal: totalmem(), ramFree: freemem(),
+          loadedVram: card ? Math.min(card.memoryUsedBytes, loaded.reduce((sum, model) => sum + Number(model.size_vram || 0), 0)) : 0,
+          loadedRam: loaded.reduce((sum, model) => sum + Math.max(0, Number(model.size || 0) - Number(model.size_vram || 0)), 0),
+          loadedModels: loaded.map(loadedModelStatus), parallelLimit: instance.parallel, modelParallelLimits, singleModel: true,
+          residentOptions: residentOptions.get(instance.id) }
+      })
+      const value = { models: tags.models || [], instances }
       schedulingResources = { checkedAt: Date.now(), value }; return value
     })().finally(() => { resourceRefresh = null })
     return resourceRefresh
@@ -326,11 +391,12 @@ function readGpuUsage() {
   if (Date.now() - gpuSnapshot.checkedAt < 4_000) {
     return Promise.resolve(gpuSnapshot.value)
   }
-  return new Promise((resolveGpu) => {
+  if (gpuRefresh) return gpuRefresh
+  gpuRefresh = new Promise((resolveGpu) => {
     execFile(
       process.platform === 'win32' ? 'nvidia-smi.exe' : 'nvidia-smi',
       [
-        '--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu',
+        '--query-gpu=uuid,name,utilization.gpu,memory.used,memory.total,temperature.gpu',
         '--format=csv,noheader,nounits',
       ],
       { windowsHide: true, timeout: 2_500 },
@@ -341,11 +407,12 @@ function readGpuUsage() {
             .trim()
             .split('\n')
             .map((line, index) => {
-              const [name, usage, memoryUsed, memoryTotal, temperature] = line
+              const [uuid, name, usage, memoryUsed, memoryTotal, temperature] = line
                 .split(',')
                 .map((item) => item.trim())
               return {
                 index,
+                uuid,
                 name,
                 usagePercent: Number(usage) || 0,
                 memoryUsedBytes: (Number(memoryUsed) || 0) * 1024 * 1024,
@@ -375,11 +442,19 @@ function readGpuUsage() {
             devices,
           }
         }
-        gpuSnapshot = { checkedAt: Date.now(), value }
-        resolveGpu(value)
+        if (!value) { gpuSnapshot = { checkedAt: Date.now(), value }; resolveGpu(value); return }
+        execFile(process.platform === 'win32' ? 'nvidia-smi.exe' : 'nvidia-smi',
+          ['--query-compute-apps=gpu_uuid,pid,used_memory,process_name', '--format=csv,noheader,nounits'],
+          { windowsHide: true, timeout: 2500 }, (processError, processOutput) => {
+            const processes = processError ? null : gpuProcesses(processOutput)
+            for (const device of value.devices) device.processes = processes?.filter(process => process.gpuId === device.uuid) ?? null
+            gpuSnapshot = { checkedAt: Date.now(), value }
+            resolveGpu(value)
+          })
       },
     )
-  })
+  }).finally(() => { gpuRefresh = null })
+  return gpuRefresh
 }
 
 function tailText(path, maximumBytes = 512 * 1024) {
@@ -421,12 +496,8 @@ async function readOllamaInference() {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 3_000)
   try {
-    const response = await fetch(createOllamaTarget('/api/ps'), {
-      signal: controller.signal,
-      headers: { Accept: 'application/json' },
-    })
-    if (!response.ok) throw new Error(`Ollama ps HTTP ${response.status}`)
-    const body = await response.json()
+    const body = await loadedAcrossRuntimes()
+    if (!body.instances.some(instance => instance.online)) throw new Error('Ollama runtime unavailable')
     const loaded = Array.isArray(body.models) ? body.models[0] : null
     if (!loaded) {
       return {
@@ -440,6 +511,8 @@ async function readOllamaInference() {
         totalLayers: 0,
         computeLibrary: ollamaRuntimeComputeLibrary,
         offline: ollamaRuntimeOffline,
+        loadedModels: [],
+        instances: body.instances,
       }
     }
     const modelBytes = Number(loaded.size || 0)
@@ -449,6 +522,7 @@ async function readOllamaInference() {
       backend: loadedModelStatus(loaded).backend,
       evidence: 'ollama-api-ps',
       loadedModels: body.models.map(loadedModelStatus),
+      instances: body.instances,
       model: loaded.name || loaded.model || '',
       modelBytes,
       vramBytes,
@@ -854,6 +928,7 @@ async function appendModelImportFailure(body) {
     '============================================================',
     `Time: ${new Date().toISOString()}`,
     `ShotAI: ${releaseVersion}`,
+    `Build: ${buildId}`,
     `Host: ${hostname()} | ${operatingSystemPlatform()} ${operatingSystemRelease()}`,
     `Ollama: ${safeLogText(ollama.version || ollama.error || 'unknown')}`,
     `Ollama source: ${safeLogText(ollamaRuntimeSource)} | ${safeLogText(ollamaUrl.origin)}`,
@@ -874,17 +949,19 @@ async function appendModelImportFailure(body) {
   ]
   mkdirSync(dirname(modelImportLogPath), { recursive: true })
   const content = `${lines.join('\n')}\n`
-  appendFileSync(modelImportLogPath, content, 'utf8')
+  diagnostics.appendLog(modelImportLogPath, content)
   if (
     installModelImportLogPath &&
     installModelImportLogPath !== modelImportLogPath
   ) {
     mkdirSync(dirname(installModelImportLogPath), { recursive: true })
-    appendFileSync(installModelImportLogPath, content, 'utf8')
+    diagnostics.appendLog(installModelImportLogPath, content)
   }
   const diagnostic = saveImportDiagnostic(runtimeLogDirectory, content,
     globalThis.__shotaiOllamaDiagnostic || { pid: ollamaRuntimePid, executable: '外部服务：未知', workingDirectory: '外部服务：未知' },
-    { Ollama: ollamaRuntimeLogPath, ShotAI: join(runtimeLogDirectory, 'desktop.log') })
+    { Ollama: ollamaRuntimeLogPath, ShotAI: join(runtimeLogDirectory, 'desktop.log'),
+      Tasks: join(runtimeLogDirectory, 'tasks.jsonl'),
+      ...Object.fromEntries(runtimeInstances.filter(instance => instance.id !== 'primary').map(instance => [instance.id, join(runtimeLogDirectory, `ollama-${instance.id}.log`)])) })
   return { ...diagnostic, downloadUrl: `/shotai/model-import-diagnostic/${diagnostic.filename}` }
 }
 
@@ -1012,6 +1089,7 @@ function updateModelOperationStatus(token, chunk) {
 
 function finishModelOperation(token, succeeded, message = '') {
   if (!token || token.finished) return
+  runtimeMetadata.invalidate()
   token.finished = true
   modelOperationState.activeCount = Math.max(0, modelOperationState.activeCount - 1)
   if (message) modelOperationState.status = message
@@ -1041,10 +1119,23 @@ function proxyLocalService(
   let upstreamResponse = null
   let upstreamEnded = false
   let completed = false
+  const outcome = options.inference ? new InferenceOutcome() : null
   const complete = () => {
     if (completed) return
     completed = true
-    options.onComplete?.(upstreamEnded)
+    options.onComplete?.(upstreamEnded, outcome?.finish())
+  }
+  const failUpstream = (error) => {
+    finishModelOperation(operation, false, `AI 服务连接中断：${error.message}`)
+    complete()
+    if (response.destroyed) return
+    if (response.headersSent) {
+      response.destroy(error)
+      return
+    }
+    respondJson(response, 502, {
+      error: `无法连接主机上的${options.serviceLabel}：${error.message}`,
+    })
   }
   const cancelUpstream = () => {
     if (completed) return
@@ -1081,7 +1172,10 @@ function proxyLocalService(
     },
     (proxyResponse) => {
       upstreamResponse = proxyResponse
+      if (outcome) proxyResponse.on('data', chunk => outcome.push(chunk))
       proxyResponse.once('end', () => { upstreamEnded = true })
+      proxyResponse.once('aborted', () => failUpstream(new Error('AI 服务在响应完成前断开连接')))
+      proxyResponse.once('error', failUpstream)
       response.writeHead(proxyResponse.statusCode || 502, proxyResponse.headers)
       if (operation) {
         proxyResponse.on('data', (chunk) => {
@@ -1105,18 +1199,7 @@ function proxyLocalService(
     },
   )
 
-  proxyRequest.on('error', (error) => {
-    finishModelOperation(operation, false, `AI 服务连接中断：${error.message}`)
-    complete()
-    if (response.destroyed) return
-    if (response.headersSent) {
-      response.destroy(error)
-      return
-    }
-    respondJson(response, 502, {
-      error: `无法连接主机上的${options.serviceLabel}：${error.message}`,
-    })
-  })
+  proxyRequest.on('error', failUpstream)
   proxyRequest.once('close', complete)
 
   request.on('aborted', () => {
@@ -1135,7 +1218,7 @@ function proxyLocalService(
   return cancelUpstream
 }
 
-function proxyOllamaDirect(request, response, requestUrl, onComplete, body) {
+function proxyOllamaDirect(request, response, requestUrl, onComplete, body, target = ollamaUrl) {
   const trackedOperation =
     request.method === 'POST' &&
     /^\/ollama\/api\/(?:create|blobs\/)/.test(requestUrl.pathname)
@@ -1143,12 +1226,13 @@ function proxyOllamaDirect(request, response, requestUrl, onComplete, body) {
       : null
   return proxyLocalService(request, response, requestUrl, {
     publicPrefix: /^\/ollama/,
-    targetUrl: ollamaUrl,
+    targetUrl: target,
     proxyName: 'lan',
     serviceLabel: 'AI 服务',
     operation: trackedOperation,
     captureStatus: requestUrl.pathname === '/ollama/api/create',
     onComplete,
+    inference: isScheduledInference(request, requestUrl),
     body,
   })
 }
@@ -1159,6 +1243,43 @@ function isScheduledInference(request, requestUrl) {
 }
 
 function proxyOllama(request, response, requestUrl) {
+  const path = requestUrl.pathname.replace(/^\/ollama/, '')
+  if (request.method === 'DELETE' && path === '/api/delete') {
+    const load = inferenceLoadSnapshot()
+    if (load.running || load.queued || modelOperationState.activeCount || modelMutationActive) {
+      respondJson(response, 409, { code: 'MODEL_BUSY', error: '当前仍有任务，请结束后再删除模型' }); return
+    }
+    modelMutationActive = true
+    void (async () => {
+      try {
+        const body = await readJsonRequest(request, 16384)
+        if (typeof body.model !== 'string' || !body.model.trim()) { respondJson(response, 400, { code: 'INVALID_MODEL', error: '请指定有效模型名称' }); return }
+        await changeModelEverywhere('/api/generate', { model: body.model, keep_alive: 0, stream: false })
+        await changeModelEverywhere('/api/delete', { model: body.model }, 'DELETE')
+        if (!response.destroyed) respondJson(response, 200, { deleted: true })
+      } catch (error) {
+        if (!response.destroyed) respondJson(response, error.status || 502, { code: 'MODEL_DELETE_FAILED', error: error.message })
+      } finally { modelMutationActive = false }
+    })()
+    return
+  }
+  if ((request.method === 'GET' && ['/api/version', '/api/tags', '/api/ps'].includes(path)) ||
+      (request.method === 'POST' && path === '/api/show')) {
+    void (async () => {
+      try {
+        const body = request.method === 'POST' ? await readJsonRequest(request, 16384) : undefined
+        const result = path === '/api/ps' ? await loadedAcrossRuntimes() : await metadataFromAvailable(path, body, request.headers['x-shotai-refresh'] === '1')
+        if (path === '/api/ps' && !result.instances.some(instance => instance.online)) {
+          respondJson(response, 503, { code: 'RUNTIME_UNAVAILABLE', error: 'AI 运行服务暂时不可用' }); return
+        }
+        if (!response.destroyed) respondJson(response, 200, result)
+      } catch (error) {
+        if (!response.destroyed) respondJson(response, error.status || 502, { error: error.message })
+      }
+    })()
+    return
+  }
+  if (request.method !== 'GET') runtimeMetadata.invalidate()
   if (!isScheduledInference(request, requestUrl)) {
     proxyOllamaDirect(request, response, requestUrl)
     return
@@ -1191,16 +1312,28 @@ function clientIdentity(request) {
 async function scheduleRequest(request, response, requestUrl, kind) {
   const id = randomBytes(16).toString('hex')
   response.setHeader('X-ShotAI-Task-Id', id)
-  const task = inferenceTasks.create({ id, client: clientIdentity(request), kind })
-  const updateTask = state => inferenceTasks.update(id, state)
+  const operationHeader = String(request.headers['x-shotai-operation-id'] || '')
+  const operationId = /^[a-zA-Z0-9_-]{8,100}$/.test(operationHeader) ? operationHeader : id
+  const stageHeader = String(request.headers['x-shotai-task-stage'] || '')
+  const stage = /^[a-z-]{1,40}$/.test(stageHeader) ? stageHeader : kind === 'image' ? 'image-generation' : 'inference'
+  const task = inferenceTasks.create({ id, client: clientIdentity(request), kind, operationId, stage })
+  const updateTask = (state, details) => inferenceTasks.update(id, state, details)
   const job = { client: clientIdentity(request), kind, ready: false, modelBytes: 0, context: 4096,
     start(done) {
-      updateTask('running')
+      updateTask('running', { model: job.model, runtimeId: runtimeFor(job).id })
+      if (kind === 'text') residentOptions.set(runtimeFor(job).id, { model: job.model, context: job.context, parallel: runtimeFor(job).parallel })
       let finished = false
-      const finish = (upstreamEnded = false) => {
+      const finish = (upstreamEnded = false, result) => {
         if (finished) return
         finished = true
-        updateTask(task.state === 'cancel-requested' ? 'connection-closed' : upstreamEnded && response.statusCode < 400 ? 'completed' : 'failed')
+        const expectsDone = kind === 'text' && /\/(?:chat|generate)$/.test(requestUrl.pathname)
+        const cancelled = task.state === 'cancel-requested'
+        const success = upstreamEnded && response.statusCode < 400 && !result?.code && (!expectsDone || result?.done)
+        updateTask(cancelled ? 'connection-closed' : success ? 'completed' : 'failed', {
+          httpStatus: response.headersSent ? response.statusCode : undefined, model: job.model, runtimeId: job.runtimeId,
+          code: cancelled ? 'CLIENT_CANCELLED' : result?.code || (success ? expectsDone ? 'MODEL_OUTPUT_COMPLETED' : 'HTTP_COMPLETED' : 'UPSTREAM_INCOMPLETE'),
+          metrics: result,
+        })
         done()
       }
       const controller = new AbortController()
@@ -1208,22 +1341,30 @@ async function scheduleRequest(request, response, requestUrl, kind) {
       void (async () => {
         if (kind === 'image') {
           // The image barrier owns the slot; release idle LLM residency before diffusion.
-          const ps = await runtimeJson(ollamaUrl, '/api/ps', { signal: controller.signal }).catch(() => ({ models: [] }))
-          for (const model of ps.models || []) {
-            await runtimeJson(ollamaUrl, '/api/generate', { body: { model: model.name || model.model, keep_alive: 0, stream: false }, signal: controller.signal, timeout: 30000 })
+          for (const instance of runtimeInstances) {
+            const ps = await runtimeJson(instance.url, '/api/ps', { signal: controller.signal })
+            for (const model of ps.models || []) {
+              await runtimeJson(instance.url, '/api/generate', { body: { model: model.name || model.model, keep_alive: 0, stream: false }, signal: controller.signal, timeout: 30000 })
+            }
           }
           schedulingResources.checkedAt = 0
         }
         if (controller.signal.aborted || response.destroyed) { finish(); return }
-        job.abort = (kind === 'image' ? proxyImageDirect : proxyOllamaDirect)(request, response, requestUrl, finish, job.body)
+        job.abort = kind === 'image'
+          ? proxyImageDirect(request, response, requestUrl, finish, job.body)
+          : proxyOllamaDirect(request, response, requestUrl, finish, job.body, new URL(runtimeFor(job).url))
       })().catch((error) => {
         if (!response.destroyed) respondJson(response, 502, { code: 'GPU_TASK_PREPARE_FAILED', error: error.message })
         finish()
       })
     } }
   if (!scheduler.enqueue(job)) {
-    updateTask('rejected')
-    respondJson(response, 429, { code: 'INFERENCE_QUEUE_FULL', error: '当前用户额度或客户端等待额度已满，请稍后重试', concurrency: scheduler.snapshot() }, { 'Retry-After': '5' })
+    updateTask('rejected', { code: job.rejectionReason })
+    const error = job.rejectionReason === 'client-queue-full'
+      ? '当前设备已有两项任务正在处理或排队，请等待完成或停止已有任务后重试'
+      : '当前服务的使用人数已达上限，请等待其他用户的任务结束后重试'
+    respondJson(response, 429, { code: 'INFERENCE_QUEUE_FULL', reason: job.rejectionReason,
+      error, concurrency: scheduler.snapshot() }, { 'Retry-After': '5' })
     return
   }
   const cancel = () => {
@@ -1238,6 +1379,7 @@ async function scheduleRequest(request, response, requestUrl, kind) {
     for await (const chunk of request) {
       bytes += chunk.length
       if (bytes > 64 * 1024 * 1024) {
+        updateTask('failed', { code: 'INFERENCE_BODY_TOO_LARGE', httpStatus: 413 })
         scheduler.cancel(job); respondJson(response, 413, { code: 'INFERENCE_BODY_TOO_LARGE', error: '推理请求超过 64 MiB，请缩小图片或上下文' }); return
       }
       chunks.push(chunk)
@@ -1247,12 +1389,14 @@ async function scheduleRequest(request, response, requestUrl, kind) {
     let body = {}
     if (/application\/json/i.test(request.headers['content-type'] || '')) {
       try { body = JSON.parse(job.body.toString('utf8')) } catch {
+        updateTask('failed', { code: 'INVALID_JSON', httpStatus: 400 })
         scheduler.cancel(job); respondJson(response, 400, { code: 'INVALID_JSON', error: '请求格式无效' }); return
       }
     }
     job.model = String(body.model || '')
     if (kind === 'text' && requestUrl.pathname.endsWith('/generate') && Number(body.width) > 0 && Number(body.height) > 0) job.kind = 'image'
     job.context = Math.max(2048, Math.min(131072, Number(body.options?.num_ctx) || 4096))
+    if (/\/(?:embed|embeddings)$/.test(requestUrl.pathname)) job.parallelLimit = 1
     // Metadata lookup never loads a model and is bounded; cancelled requests cannot resurrect.
     const resources = await scheduler.resourceProvider()
     const normalizeName = (name) => name.includes(':') ? name : `${name}:latest`
@@ -1262,6 +1406,7 @@ async function scheduleRequest(request, response, requestUrl, kind) {
     job.ready = true
     scheduler.drain()
   } catch (error) {
+    if (job.state !== 'done') updateTask('failed', { code: 'INFERENCE_PREPARE_FAILED', httpStatus: 502 })
     scheduler.cancel(job)
     if (!response.destroyed && !response.headersSent) respondJson(response, 502, { code: 'INFERENCE_PREPARE_FAILED', error: error.message })
   }
@@ -1439,11 +1584,11 @@ function cleanupModelCache() {
   return { removedFiles, removedBytes }
 }
 
-const inferenceTasks = new TaskRegistry({ record: event => writeTaskEvent(runtimeLogDirectory, event) })
+const inferenceTasks = new TaskRegistry({ record: event => writeTaskEvent(runtimeLogDirectory, event), context: { version: releaseVersion, buildId } })
 const maintenance = new ModelMaintenance({ directory: join(dataDirectory, 'maintenance'),
   list: async () => (await runtimeJson(ollamaUrl, '/api/tags')).models?.map(model => model.name || model.model).filter(Boolean) || [],
-  unload: model => runtimeJson(ollamaUrl, '/api/generate', { body: { model, keep_alive: 0, stream: false }, timeout: 30000 }),
-  remove: model => runtimeJson(ollamaUrl, '/api/delete', { method: 'DELETE', body: { model }, timeout: 30000 }),
+  unload: model => changeModelEverywhere('/api/generate', { model, keep_alive: 0, stream: false }),
+  remove: model => changeModelEverywhere('/api/delete', { model }, 'DELETE'),
   cleanup: () => cleanupModelCache(),
 })
 
@@ -1525,10 +1670,10 @@ async function handleModelHealth(request, response) {
       respondJson(response, 400, { code: 'INVALID_MODEL', error: '请指定有效模型名称' }); return
     }
     const run = async () => {
-      const report = await inspectModel(ollamaUrl, body.model, { probe: body.probe === true, signal: controller.signal })
+      const report = await inspectModel(runtimeFor(job || {}).url, body.model, { probe: body.probe === true, signal: controller.signal })
       try {
         mkdirSync(runtimeLogDirectory, { recursive: true })
-        appendFileSync(join(runtimeLogDirectory, 'model-health.jsonl'), `${JSON.stringify(report)}\n`)
+        diagnostics.appendLog(join(runtimeLogDirectory, 'model-health.jsonl'), `${JSON.stringify({ ...report, buildId })}\n`)
       } catch { /* A read-only installation must not prevent the diagnostic response. */ }
       if (!response.destroyed) respondJson(response, 200, report)
     }
@@ -1552,6 +1697,21 @@ async function handleModelHealth(request, response) {
 
 const server = createServer(async (request, response) => {
   const requestUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`)
+  if (requestUrl.pathname === '/shotai/office-results') {
+    if (request.method !== 'POST') { respondMethodNotAllowed(response, 'POST'); return }
+    const operationId = String(request.headers['x-shotai-operation-id'] || '')
+    try {
+      const body = await readJsonRequest(request, 4096)
+      if (!/^[a-zA-Z0-9_-]{8,100}$/.test(operationId) || !Array.isArray(body.files) || body.files.length < 1 || body.files.length > 4 ||
+          body.files.some(file => !file || !['excel', 'word', 'pdf'].includes(file.kind) || !Number.isInteger(file.checks) || file.checks < 0 || file.checks > 1000)) {
+        respondJson(response, 400, { code: 'INVALID_FILE_RESULT', error: '文件校验记录无效' }); return
+      }
+      writeTaskEvent(runtimeLogDirectory, { version: releaseVersion, buildId, id: operationId, operationId,
+        kind: 'office', state: 'file-validated', evidence: 'client-file-validation', files: body.files.map(file => ({ kind: file.kind, checks: file.checks })) })
+      respondJson(response, 200, { recorded: true })
+    } catch { respondJson(response, 400, { code: 'INVALID_FILE_RESULT', error: '文件校验记录无效' }) }
+    return
+  }
   if (requestUrl.pathname.startsWith('/shotai/tasks/')) {
     if (request.method !== 'GET') { respondMethodNotAllowed(response, 'GET'); return }
     const task = inferenceTasks.get(requestUrl.pathname.slice('/shotai/tasks/'.length))
@@ -1567,7 +1727,7 @@ const server = createServer(async (request, response) => {
       const body = await readJsonRequest(request, 1024)
       if (body.confirm !== '清理模型') { respondJson(response, 400, { code: 'CONFIRM_REQUIRED', error: '缺少清理确认' }); return }
       const load = inferenceLoadSnapshot()
-      if (maintenance.active || modelOperationState.activeCount || load.running || load.queued) { respondJson(response, 409, { code: 'MODEL_BUSY', error: '当前仍有任务，请结束后再清理' }); return }
+      if (maintenance.active || modelMutationActive || modelOperationState.activeCount || load.running || load.queued) { respondJson(response, 409, { code: 'MODEL_BUSY', error: '当前仍有任务，请结束后再清理' }); return }
       const job = maintenance.start()
       writeTaskEvent(runtimeLogDirectory, { id: job.id, kind: 'maintenance', state: 'running' })
       void maintenance.done.then(() => writeTaskEvent(runtimeLogDirectory, { id: job.id, kind: 'maintenance', state: maintenance.snapshot().state }))
@@ -1578,6 +1738,12 @@ const server = createServer(async (request, response) => {
   }
   if (maintenance.active && request.method !== 'GET' && /^\/(ollama|image|image-runtime|shotai\/model-import\/files|shotai\/model-cache|shotai\/models\/health)/.test(requestUrl.pathname)) {
     respondJson(response, 409, { code: 'MODEL_MAINTENANCE_ACTIVE', error: '模型清理正在后台执行，请稍后重试', taskId: maintenance.snapshot().id }); return
+  }
+  if (modelMutationActive && request.method !== 'GET' && /^\/(ollama|image|shotai\/models\/health)/.test(requestUrl.pathname)) {
+    respondJson(response, 409, { code: 'MODEL_BUSY', error: '模型管理操作正在执行，请稍后重试' }); return
+  }
+  if (modelOperationState.activeCount && isScheduledInference(request, requestUrl)) {
+    respondJson(response, 409, { code: 'MODEL_BUSY', error: '模型正在导入，请等待导入完成后重试' }); return
   }
   requestCount += 1
   markClientOnline(request, requestUrl)
@@ -1681,6 +1847,7 @@ const server = createServer(async (request, response) => {
     const hostRequest = isHostRequest(request)
     respondJson(response, 200, {
       version: releaseVersion,
+      buildId,
       apiVersion: 2,
       platform: process.platform,
       isHost: hostRequest,
@@ -1697,6 +1864,7 @@ const server = createServer(async (request, response) => {
         systemOllamaDetected,
         computeLibrary: ollamaRuntimeComputeLibrary,
         offline: ollamaRuntimeOffline,
+        instances: runtimeInstances.map(({ id, gpuId, parallel }) => ({ id, gpuId: gpuId || '', parallel })),
       },
       logs: {
         directory: hostRequest ? runtimeLogDirectory : '由主机统一管理',
@@ -1713,7 +1881,7 @@ const server = createServer(async (request, response) => {
   if (requestUrl.pathname === '/shotai/models/loaded') {
     if (request.method !== 'GET') { respondMethodNotAllowed(response, 'GET'); return }
     try {
-      const ps = await runtimeJson(ollamaUrl, '/api/ps')
+      const ps = await loadedAcrossRuntimes()
       respondJson(response, 200, { checkedAt: new Date().toISOString(), models: (ps.models || []).map(loadedModelStatus), concurrency: scheduler.snapshot() })
     } catch (error) { respondJson(response, 503, { code: 'MODEL_STATUS_UNAVAILABLE', error: error.message }) }
     return
@@ -1881,6 +2049,10 @@ const server = createServer(async (request, response) => {
     if (isProtectedOllamaRequest(request, requestUrl) && !canManageRequest(request)) {
       respondJson(response, 403, { error: '模型由主机管理员统一管理' })
       return
+    }
+    if (request.method === 'POST' && isProtectedOllamaRequest(request, requestUrl)) {
+      const load = inferenceLoadSnapshot()
+      if (load.running || load.queued) { respondJson(response, 409, { code: 'MODEL_BUSY', error: '当前仍有任务，请结束后再管理模型' }); return }
     }
     proxyOllama(request, response, requestUrl)
     return

@@ -24,8 +24,16 @@ const {
 const { networkInterfaces } = require('node:os')
 const { basename, dirname, extname, join, resolve } = require('node:path')
 const { pathToFileURL } = require('node:url')
+const { appendLog } = require(app.isPackaged
+  ? join(process.resourcesPath, 'shotai', 'server', 'runtime-diagnostics.cjs')
+  : '../../scripts/runtime-diagnostics.cjs')
 
 const APP_NAME = 'ShotAI'
+function readBuildInfo() {
+  return readJson(app.isPackaged
+    ? join(process.resourcesPath, 'shotai', 'server', 'build-info.json')
+    : join(app.getAppPath(), 'build-info.json'), { buildId: 'development' })
+}
 function nativeText(chinese, english) {
   const { systemLocale } = require('./locale.cjs')
   return systemLocale(process.env, app.getLocale()) === 'zh-CN' ? chinese : english
@@ -36,6 +44,8 @@ const CONTROL_TIMEOUT_MS = 30_000
 let mainWindow = null
 let tray = null
 let ollamaProcess = null
+const ollamaProcesses = new Set()
+const requestedProcessStops = new WeakMap()
 let imageProcess = null
 let quitting = false
 let dataRoot = ''
@@ -46,7 +56,6 @@ let serverReady = false
 let forceQuit = false
 let quitPromptOpen = false
 let shutdownStarted = false
-const openLogFiles = []
 const ollamaRuntimeState = {
   source: 'unavailable',
   endpoint: '',
@@ -64,7 +73,9 @@ const imageRuntimeState = {
 }
 globalThis.__shotaiImageRuntimeState = imageRuntimeState
 
-if (!app.requestSingleInstanceLock({ version: app.getVersion() })) {
+const ownsInstance = app.requestSingleInstanceLock({ version: app.getVersion() })
+if (!ownsInstance) {
+  quitting = true
   app.quit()
 }
 
@@ -101,7 +112,7 @@ function log(message) {
   const line = `${new Date().toISOString()} ${message}\n`
   if (logPath) {
     try {
-      appendFileSync(logPath, line, 'utf8')
+      appendLog(logPath, line)
     } catch {
       // Logging must never prevent startup.
     }
@@ -141,10 +152,21 @@ function writeRuntimeConfig() {
       ...(bundled.concurrency || {}),
       ...(saved.concurrency || {}),
     },
+    ollamaRuntime: {
+      mode: 'single',
+      parallelPerInstance: 2,
+      ...(bundled.ollamaRuntime || {}),
+      ...(saved.ollamaRuntime || {}),
+    },
   }
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) {
     config.port = DEFAULT_PORT
   }
+  const parallel = Number(config.ollamaRuntime.parallelPerInstance)
+  config.ollamaRuntime.parallelPerInstance = Number.isFinite(parallel) ? Math.max(1, Math.min(5, Math.floor(parallel))) : 1
+  if (!['single', 'per-gpu'].includes(config.ollamaRuntime.mode)) config.ollamaRuntime.mode = 'single'
+  if (!Array.isArray(config.ollamaRuntime.gpuIds)) config.ollamaRuntime.gpuIds = []
+  config.ollamaRuntime.gpuIds = [...new Set(config.ollamaRuntime.gpuIds.map(String))]
   writeFileSync(savedPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8')
   return savedPath
 }
@@ -206,7 +228,7 @@ async function findPrivateOllamaUrl() {
 async function waitForEndpoint(url, child, timeout = CONTROL_TIMEOUT_MS) {
   const deadline = Date.now() + timeout
   while (Date.now() < deadline) {
-    if (child?.exitCode !== null) {
+    if (child && (child.exitCode !== null || child.signalCode !== null)) {
       throw new Error(`AI 服务启动后提前停止，代码：${child.exitCode}`)
     }
     if (await endpointOnline(url, 1_000)) return
@@ -216,9 +238,12 @@ async function waitForEndpoint(url, child, timeout = CONTROL_TIMEOUT_MS) {
 }
 
 function openProcessLog(name) {
-  const descriptor = openSync(runtimeLogFile(name), 'a')
-  openLogFiles.push(descriptor)
-  return descriptor
+  const path = runtimeLogFile(name)
+  return child => {
+    for (const stream of [child.stdout, child.stderr]) {
+      stream?.on('data', chunk => appendLog(path, chunk))
+    }
+  }
 }
 
 function cleanupInterruptedOllamaCopies(modelDirectory) {
@@ -241,6 +266,20 @@ function cleanupInterruptedOllamaCopies(modelDirectory) {
     log(`已清理 ${files} 个中断的模型转换临时文件，共 ${Math.round(bytes / 1024 / 1024)} MiB。`)
   }
   return { files, bytes }
+}
+
+function runtimeGpuIds() {
+  if (config.ollamaRuntime.mode !== 'per-gpu') return []
+  const result = spawnSync(process.platform === 'win32' ? 'nvidia-smi.exe' : 'nvidia-smi',
+    ['--query-gpu=uuid,index', '--format=csv,noheader,nounits'], { encoding: 'utf8', windowsHide: true, timeout: 5000 })
+  if (result.status !== 0) throw new Error('无法读取 NVIDIA 显卡，无法启用逐卡实例模式')
+  const visible = String(process.env.CUDA_VISIBLE_DEVICES || '').split(',').map(value => value.trim()).filter(Boolean)
+  const selected = config.ollamaRuntime.gpuIds || []
+  const devices = result.stdout.trim().split('\n').map(line => line.split(',').map(value => value.trim()))
+    .filter(([uuid, index]) => (!visible.length || visible.includes(uuid) || visible.includes(index)) &&
+      (!selected.length || selected.includes(uuid) || selected.includes(index)))
+  if (!devices.length) throw new Error('逐卡实例模式没有可用的 NVIDIA 显卡，请检查显卡配置')
+  return devices.slice(0, 5).map(([uuid]) => uuid)
 }
 
 function bundledCudaLibrary(executable, libraryName) {
@@ -332,21 +371,25 @@ async function startOllama() {
           : 'Windows 完整包已固定使用内置 CUDA 12 运行库。',
       )
     }
+    const gpuIds = runtimeGpuIds()
+    const parallel = Math.max(1, Math.min(5, Number(config.ollamaRuntime.parallelPerInstance) || 1))
     const child = spawn(executable, ['serve'], {
       cwd: workingDirectory,
       windowsHide: true,
       detached: process.platform !== 'win32',
-      stdio: ['ignore', output, output],
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
         OLLAMA_HOST: new URL(config.ollamaUrl).host,
         OLLAMA_MODELS: shotAIModelDirectory,
+        ...(gpuIds.length ? { CUDA_VISIBLE_DEVICES: gpuIds[0] } : {}),
         ...(isBundledOllama
           ? {
               OLLAMA_NO_CLOUD: 'true',
+              OLLAMA_DEBUG_LOG_REQUESTS: 'false',
               OLLAMA_CONTEXT_LENGTH: process.env.OLLAMA_CONTEXT_LENGTH || '4096',
               OLLAMA_NUM_PARALLEL: String(
-                config.concurrency?.maxParallelInferences || 5,
+                parallel,
               ),
               OLLAMA_MAX_QUEUE: String(
                 Math.max(1, Math.min(5, config.concurrency?.maxActiveUsers || 5)),
@@ -360,6 +403,8 @@ async function startOllama() {
           : {}),
       },
     })
+    output(child)
+    ollamaProcesses.add(child)
     ollamaProcess = child
     globalThis.__shotaiOllamaDiagnostic.pid = child.pid || 0
     Object.assign(ollamaRuntimeState, {
@@ -371,13 +416,40 @@ async function startOllama() {
     })
     child.on('error', (error) => log(`Ollama 启动失败：${error.message}`))
     child.on('exit', (code, signal) => {
+      ollamaProcesses.delete(child)
       Object.assign(globalThis.__shotaiOllamaDiagnostic, { exitCode: code, signal })
-      log(`Ollama 已停止，代码：${code}，信号：${signal || 'none'}`)
+      log(`Ollama 已停止，代码：${code}，信号：${signal || 'none'}，原因：${requestedProcessStops.get(child) || 'unexpected-or-unknown'}`)
     })
     await waitForEndpoint(versionUrl, child)
+    ollamaRuntimeState.instances = [{ id: 'primary', url: config.ollamaUrl, pid: child.pid, gpuId: gpuIds[0] || '', parallel }]
+    for (let index = 1; index < gpuIds.length; index++) {
+      const endpoint = await findPrivateOllamaUrl()
+      const id = `gpu-${index}`
+      const extra = spawn(executable, ['serve'], {
+        cwd: workingDirectory, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env,
+          OLLAMA_HOST: new URL(endpoint).host, OLLAMA_MODELS: shotAIModelDirectory,
+          OLLAMA_NO_CLOUD: 'true', OLLAMA_LLM_LIBRARY: preferredComputeLibrary,
+          OLLAMA_DEBUG_LOG_REQUESTS: 'false',
+          OLLAMA_NUM_PARALLEL: String(parallel), OLLAMA_MAX_LOADED_MODELS: '1', OLLAMA_MAX_QUEUE: '5',
+          OLLAMA_CONTEXT_LENGTH: process.env.OLLAMA_CONTEXT_LENGTH || '4096', OLLAMA_KEEP_ALIVE: '5m',
+          CUDA_VISIBLE_DEVICES: gpuIds[index],
+        },
+      })
+      openProcessLog(`ollama-${id}.log`)(extra)
+      ollamaProcesses.add(extra)
+      extra.on('error', error => log(`Ollama 实例 ${id} 启动失败：${error.message}`))
+      extra.on('exit', (code, signal) => {
+        ollamaProcesses.delete(extra)
+        log(`Ollama 实例 ${id} 退出，代码 ${code}，信号 ${signal || 'none'}，原因：${requestedProcessStops.get(extra) || 'unexpected-or-unknown'}`)
+      })
+      await waitForEndpoint(new URL('/api/version', endpoint).toString(), extra)
+      ollamaRuntimeState.instances.push({ id, url: endpoint, pid: extra.pid, gpuId: gpuIds[index], parallel })
+    }
+    log(`Ollama 实例配置：${JSON.stringify(ollamaRuntimeState.instances)}`)
     log(`Ollama 已启动：${executable}（PID ${child.pid || '未知'}）`)
   } catch (error) {
-    stopProcess(ollamaProcess)
+    for (const child of ollamaProcesses) stopProcess(child)
     ollamaProcess = null
     log(`Ollama 启动失败：${error.message}`)
     if (isBundledOllama) throw error
@@ -522,11 +594,12 @@ async function startImageRuntime() {
   const child = spawn(executable, settings.args, {
     cwd: runtimeDirectory,
     windowsHide: true,
-    stdio: ['ignore', output, output],
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: process.platform === 'linux'
       ? { ...process.env, LD_LIBRARY_PATH: imageLibraryPath }
       : process.env,
   })
+  output(child)
   imageProcess = child
   child.on('error', (error) => {
     if (imageProcess !== child) return
@@ -545,9 +618,11 @@ async function startImageRuntime() {
   log(`图片服务已启动：${basename(executable)}`)
 }
 
-function stopProcess(child) {
+function stopProcess(child, reason = 'application-shutdown') {
   if (!child?.pid) return
   if (child.exitCode !== null || child.signalCode !== null) return
+  requestedProcessStops.set(child, reason)
+  log(`正在停止子进程 ${child.pid}，原因：${reason}`)
   if (process.platform === 'win32') {
     spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
       windowsHide: true,
@@ -565,7 +640,7 @@ function stopProcess(child) {
 }
 
 async function restartImageRuntime() {
-  stopProcess(imageProcess)
+  stopProcess(imageProcess, 'image-runtime-restart')
   imageProcess = null
   imageRuntimeState.state = 'restarting'
   imageRuntimeState.error = ''
@@ -579,6 +654,8 @@ function serverEnvironment(configPath) {
     SHOTAI_EMBEDDED: '1',
     SHOTAI_CONFIG_PATH: configPath,
     SHOTAI_OLLAMA_URL: config.ollamaUrl,
+    SHOTAI_OLLAMA_INSTANCES: JSON.stringify(ollamaRuntimeState.instances || []),
+    SHOTAI_RUNTIME_PARALLEL: String(config.ollamaRuntime.parallelPerInstance || 1),
     SHOTAI_OLLAMA_SOURCE: ollamaRuntimeState.source,
     SHOTAI_OLLAMA_PID: String(ollamaRuntimeState.pid || ''),
     SHOTAI_OLLAMA_MODEL_DIRECTORY: ollamaRuntimeState.modelDirectory,
@@ -596,6 +673,7 @@ function serverEnvironment(configPath) {
     SHOTAI_LOG_DIRECTORY: runtimeLogDirectory,
     SHOTAI_MODEL_IMPORT_LOG_PATH: runtimeLogFile('ShotAI-model-import.log'),
     SHOTAI_VERSION: app.getVersion(),
+    SHOTAI_BUILD_ID: readBuildInfo().buildId || 'development',
     SHOTAI_MAX_ACTIVE_USERS: String(config.concurrency?.maxActiveUsers || 5),
     SHOTAI_MAX_PARALLEL_INFERENCES: String(
       config.concurrency?.maxParallelInferences || 5,
@@ -744,14 +822,7 @@ function shutdown() {
     log(`网页服务停止失败：${error.message}`)
   }
   stopProcess(imageProcess)
-  stopProcess(ollamaProcess)
-  for (const descriptor of openLogFiles.splice(0)) {
-    try {
-      closeSync(descriptor)
-    } catch {
-      // Ignore duplicate close during shutdown.
-    }
-  }
+  for (const child of ollamaProcesses) stopProcess(child)
 }
 
 function activeModelOperation() {
@@ -816,6 +887,7 @@ app.on('window-all-closed', () => {
 })
 
 app.whenReady().then(async () => {
+  if (!ownsInstance || quitting) return
   app.setAppUserModelId('com.shotai.desktop')
   dataRoot = ensureDirectory(
     process.env.SHOTAI_DATA_ROOT || join(app.getPath('userData'), 'data'),
@@ -832,6 +904,7 @@ app.whenReady().then(async () => {
   runtimeLogDirectory = prepareRuntimeLogDirectory()
   logPath = runtimeLogFile('desktop.log')
   log(`${APP_NAME} ${app.getVersion()} 正在启动。数据目录：${dataRoot}`)
+  log(`构建信息：${JSON.stringify(readBuildInfo())}`)
   log(`运行日志目录：${runtimeLogDirectory}`)
   const configPath = writeRuntimeConfig()
 

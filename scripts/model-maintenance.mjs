@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, writeFileSync, readFileSync, renameSync, existsSync, appendFileSync, statSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
+import diagnostics from './runtime-diagnostics.cjs'
 
 export class ModelMaintenance {
   constructor({ directory, list, unload, remove, cleanup, save = writeFileSync }) {
@@ -52,11 +53,6 @@ export class ModelMaintenance {
 }
 
 export function writeTaskEvent(directory, event) {
-  try {
-    mkdirSync(directory, { recursive: true })
-    const path = join(directory, 'tasks.jsonl')
-    if (existsSync(path) && statSync(path).size > 5 * 1024 * 1024) renameSync(path, `${path}.1`)
-    // Never record prompts, file bodies or authorization headers.
-    appendFileSync(path, `${JSON.stringify({ time: new Date().toISOString(), ...event })}\n`, { mode: 0o600 })
-  } catch (error) { console.error(`任务日志写入失败：${error.message}`) }
+  // Never record prompts, file bodies or authorization headers.
+  diagnostics.appendLog(join(directory, 'tasks.jsonl'), `${JSON.stringify({ time: new Date().toISOString(), ...event })}\n`, 5 * 1024 * 1024)
 }

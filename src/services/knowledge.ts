@@ -1,4 +1,4 @@
-import mammoth from 'mammoth'
+import { recognizeDocumentFile } from './fileRecognition'
 
 export type KnowledgeDocumentStatus = 'ready' | 'indexing' | 'error'
 
@@ -103,27 +103,41 @@ async function extractPdfText(file: File) {
     data: new Uint8Array(await file.arrayBuffer()),
     useWorkerFetch: false,
   })
-  const document = await task.promise
-  const pages: string[] = []
-
-  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
-    const page = await document.getPage(pageNumber)
-    const textContent = await page.getTextContent()
-    const text = textContent.items
-      .map((item) => ('str' in item ? item.str : ''))
-      .join(' ')
-      .trim()
-    if (text) pages.push(`第 ${pageNumber} 页\n${text}`)
+  try {
+    const document = await task.promise
+    const pages: string[] = []
+    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+      const page = await document.getPage(pageNumber)
+      const textContent = await page.getTextContent()
+      const text = textContent.items
+        .map((item) => ('str' in item ? item.str : ''))
+        .join(' ')
+        .trim()
+      if (text) pages.push(`第 ${pageNumber} 页\n${text}`)
+    }
+    return pages.join('\n\n')
+  } catch (error) {
+    console.warn('[ShotAI][PDF_READ_FAILED]', error)
+    if (error instanceof Error && error.name === 'PasswordException') {
+      throw new Error('文件可能已加密。请在 Office 或 WPS 中取消密码保护后重新上传。')
+    }
+    if (error instanceof Error && /worker|dynamically imported module/i.test(error.message)) {
+      throw new Error('PDF 读取组件未能启动，请刷新页面后重试，或检查离线安装文件是否完整。')
+    }
+    throw new Error('PDF 内容无法读取，文件可能已损坏。请重新导出后上传。')
+  } finally {
+    await task.destroy().catch(() => undefined)
   }
-  await task.destroy()
-  return pages.join('\n\n')
 }
 
 async function extractDocxText(file: File) {
-  const result = await mammoth.extractRawText({
-    arrayBuffer: await file.arrayBuffer(),
-  })
-  return result.value
+  const { default: mammoth } = await import('mammoth')
+  try {
+    const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() })
+    return result.value
+  } catch {
+    throw new Error('Word 文档内容无法解析，请用 Office 或 WPS 重新保存为 DOCX 后上传。')
+  }
 }
 
 async function extractSpreadsheetText(file: File) {
@@ -167,6 +181,7 @@ async function extractSpreadsheetText(file: File) {
 }
 
 export async function extractKnowledgeText(file: File) {
+  file = await recognizeDocumentFile(file)
   validateKnowledgeFile(file)
   const extension = getFileExtension(file.name)
   let text = ''

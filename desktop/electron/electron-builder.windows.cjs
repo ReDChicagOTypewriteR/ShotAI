@@ -17,6 +17,8 @@ module.exports = {
         'SHOTAI_OLLAMA_RUNTIME_INFO.txt',
         'lib/ollama/*.dll',
         'lib/ollama/*.exe',
+        'lib/ollama/*_LICENSE',
+        'lib/ollama/*_NOTICE',
         'lib/ollama/cuda_v12/**/*',
       ],
     },

@@ -1,9 +1,11 @@
 # Dependencies
-node_modules/
+node_modules
+.cache/
 portal/node_modules/
 
 # Build outputs
 dist/
+build-info.json
 build/
 portal/dist/
 release/

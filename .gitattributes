@@ -1,0 +1,3 @@
+# Preserve the official upstream licence files, including their line endings.
+vendor/ollama/**/lib/ollama/*_LICENSE -whitespace -text
+vendor/ollama/**/lib/ollama/*_NOTICE -whitespace -text

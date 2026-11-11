@@ -30,7 +30,7 @@ function checkExpression(expression) {
   }
   visit(ast)
 }
-for (const file of ['src/App.vue', 'src/components/ModelHealthPanel.vue', 'src/components/ImportFailurePanel.vue', 'src/components/PendingDocument.vue']) {
+for (const file of ['src/App.vue', 'src/components/ModelHealthPanel.vue', 'src/components/ImportFailurePanel.vue', 'src/components/PendingDocument.vue', 'src/components/TaskStatus.vue']) {
   const descriptor = parseSfc(read(file)).descriptor
   checkExpression(descriptor.scriptSetup.content)
   const visit = node => {

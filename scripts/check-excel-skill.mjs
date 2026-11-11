@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict'
 import { chromium } from 'playwright-core'
 import * as XLSX from 'xlsx'
 import { readFile } from 'node:fs/promises'
@@ -11,6 +12,11 @@ const browser = await chromium.launch({
 
 let chatCount = 0
 let routeCount = 0
+const followupFormats = []
+const followupThinking = []
+const grammarError = {
+  error: { code: 400, message: 'Failed to initialize samplers: failed to parse grammar', type: 'invalid_request_error' },
+}
 
 function modelList() {
   return {
@@ -61,7 +67,7 @@ try {
         contentType: 'application/json',
         body: JSON.stringify({
           details: modelList().models[0].details,
-          capabilities: ['completion'],
+          capabilities: ['completion', 'thinking'],
           model_info: { 'qwen3.5.context_length': 32768 },
         }),
       })
@@ -71,7 +77,7 @@ try {
       const system = payload.messages.find((message) => message.role === 'system')?.content || ''
       if (system.includes('任务调度器')) {
         routeCount += 1
-        const sources = JSON.parse(system.split('\n').at(-1))
+        const sources = JSON.parse(system.split('\n').find(line => line.startsWith('[{') || line === '[]') || '[]')
         const choice = routeCount === 1
           ? { action: 'create', kind: 'excel' }
           : routeCount === 2
@@ -90,11 +96,31 @@ try {
           body: JSON.stringify({ message: { content: '表格包含键盘库存，当前库存为20。' }, done: true }) + '\n',
         })
       }
-      chatCount += 1
-      if (chatCount === 3) {
+      if (routeCount === 4) {
+        followupThinking.push(payload.think)
         const user = payload.messages.findLast((message) => message.role === 'user')?.content || ''
         if (!user.includes('B2="999"')) throw new Error('follow-up did not read the previous generated workbook')
+        if (typeof payload.format === 'object') {
+          followupFormats.push('schema')
+          return route.fulfill({
+            contentType: 'application/x-ndjson',
+            body: [
+              ...(payload.think ? [JSON.stringify({ message: { role: 'assistant', thinking: '正在规划表格' }, done: false })] : []),
+              JSON.stringify({ error: JSON.stringify(grammarError) }),
+              '',
+            ].join('\n'),
+          })
+        }
+        if (payload.format === 'json') {
+          followupFormats.push('json')
+          return route.fulfill({ status: 400, json: grammarError })
+        }
+        followupFormats.push('prompt')
+        assert.match(system, /只返回符合以下结构的单个 JSON 对象/)
+      } else {
+        assert.equal(payload.think, false, 'Automatic mode should skip reasoning on single-file plans')
       }
+      chatCount += 1
       const plan =
         chatCount === 1
           ? {
@@ -184,6 +210,7 @@ try {
     mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     buffer: sourceBuffer,
   })
+  await page.locator('.pending-document').filter({ hasText: '库存.xlsx' }).waitFor()
   await editor.fill('说明这个表格里有什么')
   await editor.press('Enter')
   await page.getByText('表格包含键盘库存，当前库存为20。').waitFor({ timeout: 20_000 })
@@ -215,22 +242,49 @@ try {
     throw new Error('Excel output cards were not restored from local storage')
   }
 
+  await page.getByRole('button', { name: '打开设置', exact: true }).click()
+  await page.locator('.parameter-row').filter({ has: page.getByText('模型推理', { exact: true }) }).locator('.el-select__wrapper').click()
+  await page.getByRole('option', { name: '开启推理', exact: true }).click()
+  await page.locator('.el-drawer:visible .el-drawer__close-btn').click()
+  await page.locator('.el-drawer:visible').waitFor({ state: 'hidden' })
   await editor.fill('再把刚才输出文件里的库存调整为1000')
   await editor.press('Enter')
   await page.getByText('已再次调整库存').waitFor({ timeout: 20_000 })
-  const followupDownloadPromise = page.waitForEvent('download')
-  await page.getByRole('button', { name: /再次修改库存\.xlsx/ }).click()
-  const followupDownload = await followupDownloadPromise
+  const [followupDownload] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: /再次修改库存\.xlsx/ }).click({ timeout: 10000 }),
+  ])
   const followupPath = await followupDownload.path()
   if (!followupPath) throw new Error('follow-up download unavailable')
   const followupWorkbook = XLSX.read(await readFile(followupPath))
   if (followupWorkbook.Sheets.Sheet1?.B2?.v !== 1000 || followupWorkbook.Sheets.Sheet1?.A2?.v !== '键盘') {
     throw new Error('follow-up failed to modify the generated workbook')
   }
+  assert.deepEqual(followupFormats, ['schema', 'schema', 'json', 'prompt'])
+  assert.deepEqual(followupThinking, [true, false, false, false])
+  assert.equal(await page.locator('.task-error').count(), 0)
   await editor.fill('请再处理一下')
   await editor.press('Enter')
   await page.getByText('需要修改哪个文件，以及哪些内容？').waitFor({ timeout: 20_000 })
   if (await page.locator('.message-file-card.is-output').count() !== 3) throw new Error('clarification unexpectedly created a file')
+
+  await editor.fill('生成一个99乘法表的excel')
+  await editor.press('Enter')
+  const multiplicationCard = page.getByRole('button', { name: /九九乘法表\.xlsx/ })
+  await multiplicationCard.waitFor()
+  const multiplicationDownloadPromise = page.waitForEvent('download')
+  await multiplicationCard.click()
+  const multiplicationDownload = await multiplicationDownloadPromise
+  const multiplicationWorkbook = XLSX.read(await readFile(await multiplicationDownload.path()))
+  const multiplicationSheet = multiplicationWorkbook.Sheets['九九乘法表']
+  assert.equal(multiplicationSheet['!ref'], 'A1:I9')
+  assert.equal(Object.keys(multiplicationSheet).filter(key => !key.startsWith('!')).length, 45)
+  assert.equal(multiplicationSheet.A1.v, '1×1=1')
+  assert.equal(multiplicationSheet.E7.v, '5×7=35')
+  assert.equal(multiplicationSheet.I9.v, '9×9=81')
+  assert.equal(routeCount, 5)
+  assert.equal(chatCount, 3)
+  assert.equal(await page.locator('.task-error').count(), 0)
 
   await page.screenshot({
     path: '/private/tmp/shotai-excel-skill-check.png',
@@ -243,6 +297,8 @@ try {
         analysisWithoutFileGeneration: true,
         editSourceRestoredAfterReload: true,
         generatedFileFollowup: true,
+        grammarErrorRecovered: true,
+        multiplicationWorkbookGeneratedLocally: true,
         clarificationWithoutMutation: true,
         workbookCreated: true,
         sourceWorkbookEdited: true,

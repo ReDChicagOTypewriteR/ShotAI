@@ -1,8 +1,9 @@
+import assert from 'node:assert/strict'
 import { chromium } from 'playwright-core'
 import { Document, Packer, Paragraph } from 'docx'
 import mammoth from 'mammoth'
 import * as XLSX from 'xlsx'
-import { PDFDocument, StandardFonts } from 'pdf-lib'
+import { PDFDict, PDFDocument, PDFName, StandardFonts } from 'pdf-lib'
 import { readFile } from 'node:fs/promises'
 
 const appUrl = process.env.SHOTAI_TEST_URL || 'http://127.0.0.1:5173'
@@ -41,10 +42,7 @@ function planForRequest(payload) {
       mode: 'edit',
       fileName: '修改后的说明.docx',
       summary: '已修改 Word 内容',
-      blocks: [
-        { type: 'title', text: '原始说明' },
-        { type: 'paragraph', text: '修改后的 Word 内容' },
-      ],
+      replacements: [{ find: '原始 Word 内容', replace: '修改后的 Word 内容' }],
     }
   }
   if (!editing) {
@@ -81,6 +79,21 @@ async function downloadArtifact(page, namePattern) {
 }
 
 let routeCount = 0
+let storyPlanAttempts = 0
+let storyProseAttempts = 0
+const editFormats = { word: [], pdf: [] }
+const grammarError = {
+  error: { code: 400, message: 'Failed to initialize samplers: failed to parse grammar', type: 'invalid_request_error' },
+}
+
+async function assertPdfPages(bytes) {
+  const pdf = await PDFDocument.load(bytes)
+  assert.ok(pdf.getPageCount() > 0)
+  for (const page of pdf.getPages()) {
+    const images = page.node.Resources()?.lookupMaybe(PDFName.of('XObject'), PDFDict)
+    assert.ok(images?.keys().length, 'Generated PDF page is missing its rendered content')
+  }
+}
 
 try {
   const page = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1440, height: 960 } })
@@ -113,7 +126,13 @@ try {
       const system = payload.messages.find((message) => message.role === 'system')?.content || ''
       if (system.includes('任务调度器')) {
         routeCount += 1
-        const sources = JSON.parse(system.split('\n').at(-1))
+        if (routeCount === 6) {
+          return route.fulfill({
+            contentType: 'application/x-ndjson',
+            body: JSON.stringify({ message: { content: '{"action":"task"}' }, done: true }) + '\n',
+          })
+        }
+        const sources = JSON.parse(system.split('\n').find(line => line.startsWith('[{') || line === '[]') || '[]')
         const kind = routeCount <= 2 || routeCount === 5 ? 'word' : 'pdf'
         const editing = routeCount === 2 || routeCount === 4
         const name = kind === 'word' ? '原始说明.docx' : '原始报告.pdf'
@@ -123,6 +142,47 @@ try {
         return route.fulfill({
           contentType: 'application/x-ndjson',
           body: JSON.stringify({ message: { content: JSON.stringify(choice) }, done: true }) + '\n',
+        })
+      }
+      if (routeCount === 2 || routeCount === 4) {
+        const kind = routeCount === 2 ? 'word' : 'pdf'
+        const format = typeof payload.format === 'object' ? 'schema' : payload.format ?? 'prompt'
+        editFormats[kind].push(format)
+        if (format === 'schema') {
+          return route.fulfill({ status: 400, json: grammarError })
+        }
+        if (kind === 'pdf' && format === 'json') {
+          return route.fulfill({
+            contentType: 'application/x-ndjson',
+            body: JSON.stringify({ error: grammarError.error }) + '\n',
+          })
+        }
+        assert.match(system, /只返回符合以下结构的单个 JSON 对象/)
+      }
+      if (routeCount === 6) {
+        assert.equal(payload.tools, undefined)
+        let content = '# 小蝌蚪找妈妈\n\n池塘里，小蝌蚪们终于找到了青蛙妈妈。'
+        if (payload.format) {
+          storyPlanAttempts++
+          content = storyPlanAttempts === 1
+            ? JSON.stringify({ mode: 'create', blocks: [{ type: 'title', text: '小蝌蚪找妈妈' }] })
+            : JSON.stringify({ mode: 'create', blocks: [
+                { type: 'paragraph', text: '生成一个 小蝌蚪找妈妈的word文档' },
+                { type: 'paragraph', text: '用户要求：生成一个 小蝌蚪找妈妈的word文档' },
+              ] })
+        } else {
+          assert.match(payload.messages.at(-1).content, /主题：小蝌蚪找妈妈。/)
+          storyProseAttempts++
+          if (storyProseAttempts === 1) {
+            return route.fulfill({
+              contentType: 'application/x-ndjson',
+              body: JSON.stringify({ message: { content: '这段不完整的正文不能保存。' }, done: true, done_reason: 'length' }) + '\n',
+            })
+          }
+        }
+        return route.fulfill({
+          contentType: 'application/x-ndjson',
+          body: JSON.stringify({ message: { content }, done: true }) + '\n',
         })
       }
       const plan = planForRequest(payload)
@@ -166,6 +226,7 @@ try {
   const editedWord = await downloadArtifact(page, /修改后的说明\.docx/)
   const editedWordText = (await mammoth.extractRawText({ buffer: editedWord })).value
   if (!editedWordText.includes('修改后的 Word 内容')) throw new Error('Word edit failed')
+  if (!editedWordText.includes('需要保留的信息')) throw new Error('Word edit lost untouched text')
 
 
 
@@ -173,7 +234,7 @@ try {
   await editor.press('Enter')
   await page.getByText('已生成工作清单 PDF').waitFor({ timeout: 20_000 })
   const createdPdf = await downloadArtifact(page, /工作清单\.pdf/)
-  if ((await PDFDocument.load(createdPdf)).getPageCount() < 1) throw new Error('PDF creation failed')
+  await assertPdfPages(createdPdf)
 
   const sourcePdf = await PDFDocument.create()
   const sourcePage = sourcePdf.addPage([595, 842])
@@ -191,7 +252,10 @@ try {
     throw error
   })
   const editedPdf = await downloadArtifact(page, /修改后的报告\.pdf/)
-  if ((await PDFDocument.load(editedPdf)).getPageCount() < 1) throw new Error('PDF edit failed')
+  await assertPdfPages(editedPdf)
+  // The PDF request reuses the model's schema downgrade learned by Word.
+  assert.deepEqual(editFormats, { word: ['schema', 'json'], pdf: ['json', 'prompt'] })
+  assert.equal(await page.locator('.task-error').count(), 0)
 
   const budgetWorkbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(budgetWorkbook, XLSX.utils.aoa_to_sheet([['项目', '金额'], ['会议', 300]]), '预算')
@@ -208,6 +272,21 @@ try {
     throw new Error('cross-format Excel to Word generation failed')
   }
 
+  await page.evaluate(async () => {
+    const { showOllamaModel } = await import('/src/services/ollama.ts')
+    await showOllamaModel('qwen3.5-doc-test:latest', true)
+  })
+  await editor.fill('生成一个 小蝌蚪找妈妈的word文档')
+  await editor.press('Enter')
+  await page.getByRole('button', { name: /小蝌蚪找妈妈\.docx/ }).waitFor()
+  const storyWord = await downloadArtifact(page, /小蝌蚪找妈妈\.docx/)
+  assert.equal(storyPlanAttempts, 2)
+  assert.equal(storyProseAttempts, 2)
+  const storyText = (await mammoth.extractRawText({ buffer: storyWord })).value
+  assert.match(storyText, /终于找到了青蛙妈妈/)
+  assert.doesNotMatch(storyText, /不完整的正文/)
+  assert.equal(await page.locator('.task-error').count(), 0)
+
   const visibleDateTimes = await page.locator('.message-footer > span:first-child').allInnerTexts()
   if (!visibleDateTimes.some((value) => /\d{4}\/\d{2}\/\d{2}.*\d{2}:\d{2}/.test(value))) {
     throw new Error(`message date and time missing: ${visibleDateTimes.join(' | ')}`)
@@ -220,6 +299,8 @@ try {
   await page.screenshot({ path: '/private/tmp/shotai-document-workflow.png', fullPage: false })
   console.log(JSON.stringify({
     manualSkillEntry: false, wordCreate: true, wordEdit: true, pdfCreate: true, pdfEdit: true,
+    wordGrammarErrorRecovered: true, pdfGrammarErrorRecovered: true,
+    standaloneWordMisrouteRecovered: true, proseFallbackVerified: true,
     excelToWord: true,
     messageDateTime: true, desktopPetRemoved: true,
   }, null, 2))

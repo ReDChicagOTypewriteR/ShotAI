@@ -1,8 +1,10 @@
-import { defineConfig } from 'vite'
+import { defineConfig, searchForWorkspaceRoot } from 'vite'
+import { realpathSync } from 'node:fs'
 import vue from '@vitejs/plugin-vue'
 import legacy from '@vitejs/plugin-legacy'
 
 export default defineConfig({
+  cacheDir: '.cache/vite',
   base: './',
   plugins: [
     vue(),
@@ -20,6 +22,9 @@ export default defineConfig({
     cssTarget: 'chrome80',
   },
   server: {
+    // Linked dependencies in a worktree may live outside Vite's default root.
+    // Permit that dependency directory so the local PDF worker can load.
+    fs: { allow: [searchForWorkspaceRoot(process.cwd()), realpathSync(new URL('./node_modules', import.meta.url))] },
     host: '0.0.0.0',
     port: 5173,
     proxy: {

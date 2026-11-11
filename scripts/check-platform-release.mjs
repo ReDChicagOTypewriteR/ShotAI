@@ -41,7 +41,14 @@ assert.ok(main.includes("process.platform === 'win32'"))
 assert.ok(main.includes("process.platform === 'linux'"))
 assert.ok(main.includes("bundledCudaLibrary(executable, 'cuda_v12')"))
 assert.ok((await read('scripts/serve-lan.mjs')).includes('loadedModelStatus(loaded).backend'))
-for (const file of ['inference-scheduler.mjs', 'model-health.mjs']) {
+const serverFiles = ['serve-lan.mjs']
+for (let index = 0; index < serverFiles.length; index++) {
+  const source = await read(`scripts/${serverFiles[index]}`)
+  for (const match of source.matchAll(/(?:from\s*|require\()['"]\.\/([^'"/]+\.(?:mjs|cjs))['"]/g)) {
+    if (!serverFiles.includes(match[1])) serverFiles.push(match[1])
+  }
+}
+for (const file of serverFiles) {
   assert.ok(ubuntu.extraResources.some((item) => item.to === `shotai/server/${file}`))
   assert.ok(windows.extraResources.some((item) => item.to === `shotai/server/${file}`))
 }

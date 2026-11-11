@@ -44,6 +44,27 @@ nvidia-smi
 
 图片功能需单独安装同平台的可选扩展：将扩展目录 `runtime/image` 内的文件复制到 ShotAI 数据目录下的 `runtime/image`，Ubuntu 还需为 `sd-server` 添加执行权限，随后重启 ShotAI。启动记录写入运行日志目录的 `image-runtime.log`；应以日志中的 CUDA 后端初始化结果和实际显存占用判断是否使用 GPU，不能只依据系统检测到显卡。
 
+## 1.4.0 开发版的运行实例配置
+
+本节适用于当前开发源码，正式下载页的 1.3.0 安装包尚不包含这些新增配置。数据目录中的 `lan.config.json` 支持：
+
+```json
+{
+  "ollamaRuntime": {
+    "mode": "single",
+    "parallelPerInstance": 2
+  }
+}
+```
+
+默认 `single` 启动一个实例，由 Ollama 决定模型放在哪张卡以及是否跨卡拆分。`parallelPerInstance` 是允许的并行上限，ShotAI 仍会根据运行组件版本、模型和实际资源进一步限制。
+
+需要两张卡各运行一个独立实例时，改为 `"mode": "per-gpu"`。可用 `"gpuIds": ["GPU-实际UUID", "GPU-另一个实际UUID"]` 指定显卡；省略时使用当前进程可见的 NVIDIA 显卡。UUID 可通过 `nvidia-smi --query-gpu=uuid,index --format=csv` 查询。每个实例绑定一张卡，共用同一份模型文件，载入后分别占用显存；模型必须能在单卡资源内运行。较大模型需要跨卡时应保留 `single`。切换前结束任务，并从托盘完全退出后重启。
+
+监控按卡显示利用率、显存及计算进程，同时列出各实例的在线与模型驻留状态。Windows 驱动未提供进程显存时显示未知；未绑定显卡的实例标为“显卡由运行时自动分配”。实例绑定配置与 CUDA 实际加载是不同证据，仍需结合运行体检及原始日志核对。
+
+桌面 `ShotAI-logs` 中的 `tasks.jsonl` 记录构建、操作、任务阶段和终态，设置页也显示构建编号。`MODEL_OUTPUT_COMPLETED` 表示运行时收到完成标记，`file-validated` 表示浏览器执行了本地文件检查；PDF 当前检查页面结构和生成计划，不代表已完成视觉校对。停止请求后的连接关闭也不等于已经确认 GPU 计算停止。运行日志按大小轮转，保留当前文件及最多三份旧日志。
+
 ## 第一次启动
 
 1. 在主机启动 ShotAI；

@@ -1,8 +1,21 @@
 import { createSHA256 } from 'hash-wasm'
 import { clientHeaders } from './clientIdentity'
+import { runtimeSchema } from './taskTools'
 
 export const OLLAMA_API_BASE =
   import.meta.env.VITE_OLLAMA_BASE_URL?.replace(/\/$/, '') || '/ollama/api'
+
+const modelDetails = new Map<string, Promise<OllamaShowResponse>>()
+const modelDigests = new Map<string, string>()
+const compatibility = new Map<string, { skipStructuredThinking?: boolean; format?: 'json' | 'text' }>()
+let versionRequest: Promise<{ version: string }> | undefined
+let versionCheckedAt = 0
+let runtimeVersion = ''
+
+function forgetModel(model: string) {
+  modelDetails.delete(model)
+  compatibility.delete(model)
+}
 
 export interface OllamaModelDetails {
   format: string
@@ -35,17 +48,23 @@ export interface OllamaShowResponse {
 }
 
 export interface OllamaChatMessage {
-  role: 'system' | 'user' | 'assistant'
+  role: 'system' | 'user' | 'assistant' | 'tool'
   content: string
   thinking?: string
   images?: string[]
+  tool_name?: string
+  tool_calls?: OllamaToolCall[]
 }
+export interface OllamaToolCall { function: { name: string; arguments: Record<string, unknown>; index?: number } }
+export interface OllamaTool { type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }
 
 export interface OllamaGenerationOptions {
   temperature: number
   top_p: number
   num_ctx: number
   num_predict: number
+  repeat_penalty?: number
+  repeat_last_n?: number
 }
 
 interface OllamaEmbedResponse {
@@ -61,6 +80,7 @@ interface OllamaChatChunk {
     role: 'assistant'
     content?: string
     thinking?: string
+    tool_calls?: OllamaToolCall[]
   }
   done?: boolean
   done_reason?: string
@@ -101,6 +121,25 @@ export class OllamaApiError extends Error {
   }
 }
 
+function apiErrorMessage(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.trim() || undefined
+  if (value && typeof value === 'object' && 'message' in value && typeof value.message === 'string') {
+    return value.message.trim() || undefined
+  }
+}
+
+function decodeStreamError(error: unknown, streamStatus?: number) {
+  let message = apiErrorMessage(error)
+  if (typeof error === 'string' && error.trimStart().startsWith('{')) {
+    try { error = JSON.parse(error) } catch { /* Retain the original error text. */ }
+  }
+  if (error && typeof error === 'object' && 'error' in error) error = error.error
+  message = apiErrorMessage(error) ?? message
+  const status = error && typeof error === 'object' && 'code' in error && typeof error.code === 'number'
+    ? error.code : streamStatus
+  return new OllamaApiError(message || 'AI 服务返回了错误', status)
+}
+
 async function parseError(response: Response) {
   const body = await response.text()
   if (!body) return createProxyAwareError(response.status)
@@ -109,10 +148,7 @@ async function parseError(response: Response) {
     const parsed = JSON.parse(body) as {
       error?: string | { message?: string }
     }
-    const apiError =
-      typeof parsed.error === 'string'
-        ? parsed.error.trim()
-        : parsed.error?.message?.trim()
+    const apiError = parsed.error ? decodeStreamError(parsed.error).message : undefined
     if (
       (response.status === 403 || response.status === 404) &&
       (!apiError || /^(?:forbidden|not found|file not found)$/i.test(apiError))
@@ -146,12 +182,13 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
       credentials: 'same-origin',
       headers: {
         Accept: 'application/json',
-        ...clientHeaders(),
+        ...clientHeaders(init?.signal instanceof AbortSignal ? init.signal : undefined),
         ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
         ...init?.headers,
       },
     })
-  } catch {
+  } catch (error) {
+    if (init?.signal?.aborted) throw error
     throw new OllamaApiError('无法连接 AI 服务，请确认 ShotAI 服务已经启动')
   }
 
@@ -173,36 +210,60 @@ async function consumeNdjson<T>(
   const decoder = new TextDecoder()
   let buffer = ''
 
-  while (true) {
-    const { done, value } = await reader.read()
-    buffer += decoder.decode(value, { stream: !done })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      const chunk = JSON.parse(trimmed) as T & { error?: string }
-      if (chunk.error) throw new OllamaApiError(chunk.error)
+  function consumeLine(line: string) {
+    if (line.trim()) {
+      const chunk = JSON.parse(line) as T & { error?: unknown; status?: number }
+      if (chunk.error) throw decodeStreamError(chunk.error, chunk.status)
       onChunk(chunk)
     }
-
-    if (done) break
   }
 
-  if (buffer.trim()) {
-    const chunk = JSON.parse(buffer) as T & { error?: string }
-    if (chunk.error) throw new OllamaApiError(chunk.error)
-    onChunk(chunk)
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      lines.forEach(consumeLine)
+      if (done) break
+    }
+    consumeLine(buffer)
+  } catch (error) {
+    // Stop reading the failed stream before opening a replacement request.
+    await reader.cancel().catch(() => {})
+    throw error
+  } finally {
+    reader.releaseLock()
   }
 }
 
-export async function getOllamaVersion() {
-  return requestJson<{ version: string }>('/version')
+export function getOllamaVersion(refresh = false) {
+  if (refresh || !versionRequest || Date.now() - versionCheckedAt > 60_000) {
+    versionCheckedAt = Date.now()
+    versionRequest = requestJson<{ version: string }>('/version', refresh ? { headers: { 'X-ShotAI-Refresh': '1' } } : undefined).then(result => {
+      if (runtimeVersion && runtimeVersion !== result.version) {
+        modelDetails.clear()
+        compatibility.clear()
+      }
+      runtimeVersion = result.version
+      return result
+    }).catch(error => { versionRequest = undefined; throw error })
+  }
+  return versionRequest
 }
 
 export async function listOllamaModels() {
   const response = await requestJson<{ models: OllamaModel[] }>('/tags')
+  const current = new Set(response.models.flatMap(model => [model.name, model.model || model.name]))
+  for (const name of modelDigests.keys()) {
+    if (!current.has(name)) { forgetModel(name); modelDigests.delete(name) }
+  }
+  for (const model of response.models) {
+    for (const name of new Set([model.name, model.model || model.name])) {
+      if (modelDigests.get(name) !== model.digest) forgetModel(name)
+      modelDigests.set(name, model.digest)
+    }
+  }
   return response.models
 }
 
@@ -211,14 +272,22 @@ export async function listRunningModels() {
   return response.models
 }
 
-export async function showOllamaModel(model: string) {
-  return requestJson<OllamaShowResponse>('/show', {
+export function showOllamaModel(model: string, refresh = false) {
+  if (refresh) forgetModel(model)
+  let pending = modelDetails.get(model)
+  if (!pending) {
+    pending = requestJson<OllamaShowResponse>('/show', {
     method: 'POST',
+    ...(refresh ? { headers: { 'X-ShotAI-Refresh': '1' } } : {}),
     body: JSON.stringify({ model, verbose: false }),
-  })
+    }).catch(error => { modelDetails.delete(model); throw error })
+    modelDetails.set(model, pending)
+  }
+  return pending
 }
 
 export async function deleteOllamaModel(model: string) {
+  forgetModel(model)
   // Deleting the manifest alone may leave a loaded runner usable until expiry.
   await requestJson('/generate', {
     method: 'POST',
@@ -246,9 +315,11 @@ export async function deleteOllamaModel(model: string) {
 export async function embedWithOllama(
   model: string,
   input: string | string[],
+  signal?: AbortSignal,
 ) {
   const response = await requestJson<OllamaEmbedResponse>('/embed', {
     method: 'POST',
+    signal,
     body: JSON.stringify({
       model,
       input,
@@ -265,25 +336,55 @@ export async function chatWithOllama(
   options: {
     signal?: AbortSignal
     think?: boolean
-    format?: 'json'
+    format?: 'json' | Record<string, unknown>
+    tools?: OllamaTool[]
+    stage?: string
     generation?: OllamaGenerationOptions
     onContent: (content: string) => void
     onThinking?: (thinking: string) => void
+    onReasoningFallback?: () => void
+    onToolCalls?: (calls: OllamaToolCall[]) => void
     onDone?: (result: { reason?: string; outputCount?: number }) => void
     onIncomplete?: () => void
   },
 ) {
-  async function startChat(think?: boolean) {
+  if (compatibility.size >= 128 && !compatibility.has(model)) compatibility.delete(compatibility.keys().next().value!)
+  const profile = compatibility.get(model) || {}
+  compatibility.set(model, profile)
+  const structured = Boolean(options.format || options.tools)
+  let think = structured && profile.skipStructuredThinking ? false : options.think
+  let format = typeof options.format === 'object' ? runtimeSchema(options.format) : options.format
+  const tools = options.tools?.map(tool => ({ ...tool, function: {
+    ...tool.function, parameters: runtimeSchema(tool.function.parameters),
+  } }))
+  let requestMessages = messages
+  function relaxFormat() {
+    if (typeof format === 'object') {
+      const instruction = `只返回符合以下结构的单个 JSON 对象，不添加说明或代码块。\n${JSON.stringify(format)}`
+      const [first, ...rest] = messages
+      requestMessages = first?.role === 'system'
+        ? [{ ...first, content: `${first.content}\n\n${instruction}` }, ...rest]
+        : [{ role: 'system', content: instruction }, ...messages]
+      format = 'json'
+    } else format = undefined
+  }
+  if (format && profile.format) {
+    relaxFormat()
+    if (profile.format === 'text') format = undefined
+  }
+  async function startChat() {
     try {
       return await fetch(`${OLLAMA_API_BASE}/chat`, {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', ...clientHeaders() },
+        headers: { 'Content-Type': 'application/json', ...clientHeaders(options.signal),
+          ...(options.stage ? { 'X-ShotAI-Task-Stage': options.stage } : {}) },
         body: JSON.stringify({
           model,
-          messages,
+          messages: requestMessages,
           stream: true,
-          ...(options.format ? { format: options.format } : {}),
+          ...(format ? { format } : {}),
+          ...(tools ? { tools } : {}),
           ...(typeof think === 'boolean' ? { think } : {}),
           keep_alive: '5m',
           options: options.generation,
@@ -296,38 +397,62 @@ export async function chatWithOllama(
     }
   }
 
-  let response = await startChat(options.think)
-  if (!response.ok) {
-    const message = await parseError(response)
-    const thinkingUnsupported =
-      options.think &&
-      /(?:does not support|unsupported).*(?:think|thinking)|(?:think|thinking).*(?:does not support|unsupported)/i.test(
-        message,
-      )
-
-    if (!thinkingUnsupported) {
-      throw new OllamaApiError(message, response.status)
-    }
-
-    response = await startChat()
-    if (!response.ok) {
-      throw new OllamaApiError(await parseError(response), response.status)
-    }
-  }
-
-  let completionReceived = false
-  await consumeNdjson<OllamaChatChunk>(response, (chunk) => {
-    if (chunk.message?.thinking) options.onThinking?.(chunk.message.thinking)
-    if (chunk.message?.content) options.onContent(chunk.message.content)
-    if (chunk.done) {
-      completionReceived = true
-      options.onDone?.({
-        reason: chunk.done_reason,
-        outputCount: chunk.eval_count,
+  while (true) {
+    options.signal?.throwIfAborted()
+    let receivedOutput = false
+    let completionReceived = false
+    let pendingThinking = ''
+    try {
+      const response = await startChat()
+      if (!response.ok) throw new OllamaApiError(await parseError(response), response.status)
+      await consumeNdjson<OllamaChatChunk>(response, (chunk) => {
+        const message = chunk.message
+        if (message?.thinking) {
+          // A structured request may start grammar sampling after streaming reasoning.
+          if ((options.format || options.tools) && !receivedOutput) {
+            if (options.onThinking) pendingThinking += message.thinking
+          } else {
+            receivedOutput = true
+            options.onThinking?.(message.thinking)
+          }
+        }
+        if (message?.tool_calls?.length || message?.content || chunk.done) {
+          receivedOutput = true
+          if (pendingThinking) {
+            options.onThinking?.(pendingThinking)
+            pendingThinking = ''
+          }
+        }
+        if (message?.tool_calls?.length) options.onToolCalls?.(message.tool_calls)
+        if (message?.content) options.onContent(message.content)
+        if (chunk.done) {
+          completionReceived = true
+          options.onDone?.({ reason: chunk.done_reason, outputCount: chunk.eval_count })
+        }
       })
+    } catch (error) {
+      options.signal?.throwIfAborted()
+      if (receivedOutput || !(error instanceof OllamaApiError)) throw error
+      if (think && /(?:does not support|unsupported).*(?:think|thinking)|(?:think|thinking).*(?:does not support|unsupported)/i.test(error.message)) {
+        think = undefined
+        continue
+      }
+      if (!/failed to (?:parse|compile) (?:the )?grammar/i.test(error.message)) throw error
+      if (think === true && (options.format || options.tools)) {
+        // Keep the output contract on the first retry and skip the reasoning phase.
+        think = false
+        profile.skipStructuredThinking = true
+        options.onReasoningFallback?.()
+        continue
+      }
+      if (!format) throw error
+      profile.format = typeof format === 'object' ? 'json' : 'text'
+      relaxFormat()
+      continue
     }
-  })
-  if (!completionReceived) options.onIncomplete?.()
+    if (!completionReceived) options.onIncomplete?.()
+    return
+  }
 }
 
 export async function generateImageWithOllama(
@@ -595,6 +720,7 @@ export async function createOllamaModel(
     await consumeNdjson<CreateChunk>(response, (chunk) => {
       if (chunk.status) onStatus?.(chunk.status)
     })
+    forgetModel(model)
   } catch (error) {
     if (
       error instanceof OllamaApiError &&
