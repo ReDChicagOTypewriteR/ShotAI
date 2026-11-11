@@ -12,7 +12,7 @@
 | [v1.1.9 Ubuntu](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/tag/v1.1.9-ubuntu) | Ubuntu 正式 Release | 对话排版、模型导入日志和图片指令识别 | Ubuntu 增加 DEB、独立 Ollama、CUDA 选择、主机监控和离线日志；Windows 保持独立运行层 |
 | [v1.2.0](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/tag/v1.2.0) | Windows / Ubuntu 正式 Release | 大模型一次读取导入、重复文件复用、五人容量控制和对话式图片操作 | Windows 完整 EXE 与 Ubuntu 完整 DEB 分平台发布 |
 | v1.3.0 | 实机测试预发布 | 办公能力整合、模型体检、并发、诊断与完整清理优化 | Windows / Ubuntu 统一构建，图片组件可选 |
-| v1.4.0 | 开发中，尚未发布 | 运行组件升级、文件输出兼容、模型驻留、双卡实例、状态缓存与日志诊断 | 本机回归通过，双平台实机验收待完成 |
+| v1.4.0 | Ubuntu 测试包，尚未发布 | 运行组件升级、文件输出兼容、模型驻留、双卡实例、状态缓存与日志诊断 | 本机回归通过，双平台实机验收待完成 |
 
 ## v1.4.0：模型运行与并发改进（开发中）
 
@@ -23,7 +23,7 @@
 - 增加逐卡进程、实例状态、模型详情缓存和后台页面节流；
 - 增加构建编号、操作关联、生成终态与文件校验记录，限制日志保留量。
 
-实现与验收进度见 [1.4.0 任务清单](RELEASE-1.4.0-PLAN.md)。当前应用版本仍为 1.3.0，尚未生成或发布 1.4.0 安装包。
+更新摘要见 [1.4.0 更新说明](RELEASE-1.4.0.md)，实现与验收进度见 [1.4.0 任务清单](RELEASE-1.4.0-PLAN.md)。本轮仅生成 Ubuntu 1.4.0 测试包，未发布到 GitHub。
 
 ## v1.1.6：统一模型与文件入口
 
