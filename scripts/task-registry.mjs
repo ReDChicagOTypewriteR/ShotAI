@@ -26,7 +26,7 @@ export class TaskRegistry extends Map {
     if (state === 'running') task.startedAt = task.updatedAt
     this.record({ ...this.context, id, operationId: task.operationId, kind: task.kind, state,
       model: task.model, runtimeId: task.runtimeId, code: task.code, httpStatus: task.httpStatus,
-      stage: task.stage, metrics: task.metrics,
+      stage: task.stage, metrics: task.metrics, requestOptions: task.requestOptions,
       queueMs: task.startedAt ? task.startedAt - task.createdAt : undefined,
       elapsedMs: task.updatedAt - task.createdAt, runtimeStopConfirmed: task.runtimeStopConfirmed })
   }

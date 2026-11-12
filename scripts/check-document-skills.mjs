@@ -162,7 +162,7 @@ try {
       if (routeCount === 6) {
         assert.equal(payload.tools, undefined)
         let content = '# 小蝌蚪找妈妈\n\n池塘里，小蝌蚪们终于找到了青蛙妈妈。'
-        if (payload.format) {
+        if (system.includes('Word 文件任务规划器')) {
           storyPlanAttempts++
           content = storyPlanAttempts === 1
             ? JSON.stringify({ mode: 'create', blocks: [{ type: 'title', text: '小蝌蚪找妈妈' }] })

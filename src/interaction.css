@@ -148,3 +148,6 @@
   .task-status-indicator { animation: none; border-color: var(--text-muted); }
   .shot-app *, .shot-app *::before, .shot-app *::after { transition: none !important; scroll-behavior: auto !important; }
 }
+.task-preview { margin: 14px 0; border-left: 2px solid var(--border); padding: 4px 0 4px 14px; }
+.task-preview small { color: var(--text-secondary); font-size: 12px; }
+.task-preview p { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow-y: auto; line-height: 1.8; margin: 8px 0 0; }

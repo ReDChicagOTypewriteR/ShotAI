@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version 1.3.0" src="https://img.shields.io/badge/version-v1.3.0-2496ed?style=flat" />
+  <img alt="Version 1.4.1" src="https://img.shields.io/badge/version-v1.4.1-2496ed?style=flat" />
   <img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078d4?style=flat&amp;logo=windows11&amp;logoColor=white" />
   <img alt="Ubuntu x64" src="https://img.shields.io/badge/Ubuntu-22.04%20x64-e95420?style=flat&amp;logo=ubuntu&amp;logoColor=white" />
   <img alt="Ollama" src="https://img.shields.io/badge/Ollama-supported-111111?style=flat&amp;logo=ollama&amp;logoColor=white" />
@@ -73,15 +73,15 @@ ShotAI 通过运行组件支持多个开放模型厂商，不绑定单一模型�
 
 ## 下载与版本
 
-**1.3.0 为待实机验证的预发布**：整合办公文件能力，优化模型导入、诊断、完整清理、并发与操作反馈，移除宠物，精简运行组件。简短说明见[1.3.0 更新内容](docs/RELEASE-1.3.0.md)。
+**当前版本 1.4.1**：加快文档分析，增加过程草稿、重复操作保护和可视化显卡分配设置。历史更新按 [1.3.0、1.4.0、1.4.1](docs/UPDATES.md) 整理。
 
-安装包与可选扩展发布到 [GitHub Releases](https://github.com/ReDChicagOTypewriteR/ShotAI/releases)。1.3.0 的核心安装包内置各平台 Ollama CUDA 12，不包含图片运行组件和模型权重。
+核心安装包包含 Ollama 0.40.16 与 CUDA 12，不包含模型权重、NVIDIA 驱动或可选图片运行组件。
 
-| 平台 / 方式 | 1.3.0 下载 |
+| 平台 / 方式 | 下载或说明 |
 | --- | --- |
-| Windows x86_64 | [EXE 安装包](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.3.0/ShotAI-1.3.0-Windows-x64-Ollama-CUDA12-Setup.exe) |
-| Ubuntu 22.04 x86_64 | [DEB](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.3.0/ShotAI-1.3.0-Ubuntu-22.04-x86_64-Ollama-CUDA12.deb) · [AppImage](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.3.0/ShotAI-1.3.0-Ubuntu-22.04-x86_64-Ollama-CUDA12.AppImage) |
-| 图片运行扩展与校验文件 | [预发布资源](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/tag/v1.3.0) |
+| Windows 10/11 x86_64 | [Windows 安装包与校验文件](https://github.com/ReDChicagOTypewriteR/ShotAI/releases) |
+| Ubuntu 22.04 x86_64 | [DEB / AppImage 与校验文件](https://github.com/ReDChicagOTypewriteR/ShotAI/releases) |
+| 图片运行扩展 | [安装说明](docs/INSTALLATION.md) |
 
 ## 项目结构
 

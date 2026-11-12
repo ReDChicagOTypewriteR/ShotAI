@@ -27,6 +27,9 @@ const { pathToFileURL } = require('node:url')
 const { appendLog } = require(app.isPackaged
   ? join(process.resourcesPath, 'shotai', 'server', 'runtime-diagnostics.cjs')
   : '../../scripts/runtime-diagnostics.cjs')
+const { normalizeRuntimeSettings } = require(app.isPackaged
+  ? join(process.resourcesPath, 'shotai', 'server', 'runtime-settings.cjs')
+  : '../../scripts/runtime-settings.cjs')
 
 const APP_NAME = 'ShotAI'
 function readBuildInfo() {
@@ -162,9 +165,7 @@ function writeRuntimeConfig() {
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) {
     config.port = DEFAULT_PORT
   }
-  const parallel = Number(config.ollamaRuntime.parallelPerInstance)
-  config.ollamaRuntime.parallelPerInstance = Number.isFinite(parallel) ? Math.max(1, Math.min(5, Math.floor(parallel))) : 1
-  if (!['single', 'per-gpu'].includes(config.ollamaRuntime.mode)) config.ollamaRuntime.mode = 'single'
+  Object.assign(config.ollamaRuntime, normalizeRuntimeSettings(config.ollamaRuntime))
   if (!Array.isArray(config.ollamaRuntime.gpuIds)) config.ollamaRuntime.gpuIds = []
   config.ollamaRuntime.gpuIds = [...new Set(config.ollamaRuntime.gpuIds.map(String))]
   writeFileSync(savedPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8')
@@ -382,6 +383,7 @@ async function startOllama() {
         ...process.env,
         OLLAMA_HOST: new URL(config.ollamaUrl).host,
         OLLAMA_MODELS: shotAIModelDirectory,
+        OLLAMA_SCHED_SPREAD: config.ollamaRuntime.mode === 'spread' ? 'true' : 'false',
         ...(gpuIds.length ? { CUDA_VISIBLE_DEVICES: gpuIds[0] } : {}),
         ...(isBundledOllama
           ? {
@@ -429,6 +431,7 @@ async function startOllama() {
         cwd: workingDirectory, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env,
           OLLAMA_HOST: new URL(endpoint).host, OLLAMA_MODELS: shotAIModelDirectory,
+          OLLAMA_SCHED_SPREAD: 'false',
           OLLAMA_NO_CLOUD: 'true', OLLAMA_LLM_LIBRARY: preferredComputeLibrary,
           OLLAMA_DEBUG_LOG_REQUESTS: 'false',
           OLLAMA_NUM_PARALLEL: String(parallel), OLLAMA_MAX_LOADED_MODELS: '1', OLLAMA_MAX_QUEUE: '5',
@@ -656,6 +659,7 @@ function serverEnvironment(configPath) {
     SHOTAI_OLLAMA_URL: config.ollamaUrl,
     SHOTAI_OLLAMA_INSTANCES: JSON.stringify(ollamaRuntimeState.instances || []),
     SHOTAI_RUNTIME_PARALLEL: String(config.ollamaRuntime.parallelPerInstance || 1),
+    SHOTAI_RUNTIME_MODE: config.ollamaRuntime.mode,
     SHOTAI_OLLAMA_SOURCE: ollamaRuntimeState.source,
     SHOTAI_OLLAMA_PID: String(ollamaRuntimeState.pid || ''),
     SHOTAI_OLLAMA_MODEL_DIRECTORY: ollamaRuntimeState.modelDirectory,

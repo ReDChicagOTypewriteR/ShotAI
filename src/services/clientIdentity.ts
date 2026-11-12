@@ -33,3 +33,10 @@ export function reportOfficeResult(signal: AbortSignal, files: Array<{ kind: str
     signal,
   }).catch(() => { /* Diagnostic delivery does not affect validated local files. */ })
 }
+
+export function reportTaskEvent(signal: AbortSignal, event: { tool: string; state: 'started' | 'completed' | 'failed'; durationMs?: number; cached?: boolean }) {
+  if (signal.aborted) return
+  void fetch('/shotai/task-events', { method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ...clientHeaders(signal) }, body: JSON.stringify(event), signal,
+  }).catch(() => { /* Diagnostics never block the office task. */ })
+}

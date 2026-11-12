@@ -5,6 +5,7 @@ import PendingDocument from './components/PendingDocument.vue'
 import TaskStatus from './components/TaskStatus.vue'
 import { DOCUMENT_ACCEPT, recognizeDocumentFile } from './services/fileRecognition'
 import LanguageSetting from './components/LanguageSetting.vue'
+import RuntimeSettings from './components/RuntimeSettings.vue'
 import {
   computed,
   defineAsyncComponent,
@@ -16,6 +17,7 @@ import {
   watch,
 } from 'vue'
 const ModelHealthPanel = defineAsyncComponent(() => import('./components/ModelHealthPanel.vue'))
+const officePreview = ref<{ messageId: number; text: string }>()
 import {
   ArrowRight,
   Check,
@@ -4051,7 +4053,12 @@ async function respondWithOfficeFile(
       onStatus(status) { assistantMessage.generationStatus = status },
       onThinking(text) { if (showReasoning.value) assistantMessage.reasoning = (assistantMessage.reasoning || '') + text },
       onStep(step) { assistantMessage.taskSteps!.push(step) },
-    })
+      onPreview(text) {
+        if (controller.signal.aborted) return
+        assistantMessage.loading = false
+        officePreview.value = { messageId: assistantMessage.id, text }
+      },
+    }).finally(() => { officePreview.value = undefined })
     controller.signal.throwIfAborted()
     const saved: MessageArtifact[] = []
     try {
@@ -5482,6 +5489,10 @@ onBeforeUnmount(() => {
                     <button v-if="item.id === latestAssistantId" type="button" :disabled="isGenerating" @click="regenerateLast">{{ t('重试本次请求') }}</button>
                     <button v-if="item.id === latestAssistantId" type="button" :disabled="isGenerating" @click="editFailedRequest">{{ t('修改要求') }}</button>
                   </div>
+                  <section v-if="isGenerating && officePreview?.messageId === item.id" class="task-preview">
+                    <small>{{ t('正在整理分析，内容尚未完成核对') }}</small>
+                    <p>{{ officePreview.text }}</p>
+                  </section>
                   <details v-if="item.taskSteps?.length || item.artifacts?.some(artifact => artifact.checks?.length)" class="task-audit">
                     <summary>{{ t('查看处理步骤与检查结果') }}</summary>
                     <ol v-if="item.taskSteps?.length">
@@ -7049,6 +7060,7 @@ onBeforeUnmount(() => {
             </div>
 
             <LanguageSetting />
+            <RuntimeSettings v-if="systemInfo.canManage" />
 
             <div class="theme-setting-row">
               <div>

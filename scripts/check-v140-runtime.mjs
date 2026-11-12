@@ -11,6 +11,9 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { InferenceOutcome } from './inference-outcome.mjs'
 import { gpuProcesses, attributeProcesses } from './runtime-gpu.mjs'
+import runtimeSettings from './runtime-settings.cjs'
+
+assert.deepEqual(runtimeSettings.normalizeRuntimeSettings({ mode: 'spread', parallelPerInstance: 2 }), { mode: 'spread', parallelPerInstance: 2 })
 
 assert.deepEqual(gpuProcesses('GPU-a, 123, 900, /runtime/llama-server\nGPU-b, 124, N/A, ollama.exe'), [
   { gpuId: 'GPU-a', pid: 123, name: '/runtime/llama-server', memoryBytes: 900 * 1024 ** 2 },
@@ -22,10 +25,13 @@ const attributed = attributeProcesses([{ pid: 101, gpuId: 'GPU-a' }, { pid: 101,
   [{ pid: 100, id: 'primary' }, { pid: 200, id: 'second' }])
 assert.deepEqual(attributed.map(process => process.runtimeId), ['primary', 'primary', 'second', undefined])
 
-const output = new InferenceOutcome()
+let observedAt = 0
+const output = new InferenceOutcome({ now: () => observedAt })
+observedAt = 45
 const stream = Buffer.from(`${JSON.stringify({ message: { content: '私密正文不要写入日志' } })}\n${JSON.stringify({ done: true, done_reason: 'stop', eval_count: 18, load_duration: 42 })}`)
 for (let index = 0; index < stream.length; index += 7) output.push(stream.subarray(index, index + 7))
-assert.deepEqual(output.finish(), { done: true, stopReason: 'stop', eval_count: 18, load_duration: 42 })
+assert.deepEqual(output.finish(), { done: true, stopReason: 'stop', eval_count: 18, load_duration: 42,
+  firstTokenMs: 45, firstContentMs: 45, contentChars: '私密正文不要写入日志'.length })
 const grammarError = new InferenceOutcome()
 grammarError.push(Buffer.from('{"error":"Failed to initialize samplers: failed to parse grammar"}\n'))
 assert.equal(grammarError.finish().code, 'GRAMMAR_PARSE_FAILED')
@@ -106,6 +112,15 @@ try {
   assert.ok(files.length <= 4)
   assert.match(await readFile(path, 'utf8'), /event-9/)
   assert.ok(files.some(name => name.endsWith('.1')))
+  const configPath = join(directory, 'lan.config.json')
+  const initial = { monitoring: { password: 'private-test-password' }, concurrency: { maxActiveUsers: 5 }, ollamaRuntime: { gpuIds: ['GPU-a'] } }
+  runtimeSettings.saveRuntimeSettings(configPath, { mode: 'per-gpu', parallelPerInstance: 1 }, initial)
+  const persisted = JSON.parse(await readFile(configPath, 'utf8'))
+  assert.equal(persisted.monitoring.password, initial.monitoring.password)
+  assert.deepEqual(persisted.ollamaRuntime.gpuIds, ['GPU-a'])
+  const unchanged = await readFile(configPath, 'utf8')
+  assert.throws(() => runtimeSettings.saveRuntimeSettings(configPath, { mode: 'bad', parallelPerInstance: 1 }))
+  assert.equal(await readFile(configPath, 'utf8'), unchanged)
 } finally { await rm(directory, { recursive: true, force: true }) }
 console.log(JSON.stringify({ sharedMetadata: true, metadataExpiry: true, failureRecovery: true,
   runtimeVersionLimits: true, twoIndependentGpuSlots: true, fairQueueRecovery: true, offlineRuntimeSkipped: true, boundedLogs: true }))
@@ -148,6 +163,7 @@ const data = await mkdtemp(join(tmpdir(), 'shotai-pool-'))
 const child = spawn(process.execPath, ['scripts/serve-lan.mjs'], { env: { ...process.env,
   SHOTAI_LAN_HOST: '127.0.0.1', SHOTAI_LAN_PORT: String(port), SHOTAI_DATA_ROOT: data, SHOTAI_OLLAMA_URL: urls[0],
   SHOTAI_BUILD_ID: 'test-v140-build',
+  SHOTAI_OLLAMA_SOURCE: 'embedded', SHOTAI_RUNTIME_MODE: 'single', SHOTAI_RUNTIME_PARALLEL: '1',
   SHOTAI_OLLAMA_INSTANCES: JSON.stringify(urls.map((url, index) => ({ id: index ? 'second' : 'primary', url, parallel: 1 }))),
 }, stdio: ['ignore', 'pipe', 'pipe'] })
 let serverOutput = ''
@@ -166,6 +182,17 @@ const post = (client, slow, signal) => fetch(`${base}/ollama/api/chat`, { method
 }, body: JSON.stringify({ model: 'qwen', slow }), signal })
 try {
   await waitFor(async () => (await fetch(`${base}/shotai/system`)).ok)
+  const settingsResponse = await fetch(`${base}/shotai/runtime-settings`)
+  assert.equal(settingsResponse.status, 200)
+  const snapshot = await settingsResponse.json()
+  assert.equal(snapshot.active.mode, 'single')
+  const settings = await fetch(`${base}/shotai/runtime-settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'single', parallelPerInstance: 1 }) })
+  assert.equal(settings.status, 200)
+  assert.equal((await settings.json()).restartRequired, false)
+  const invalid = await fetch(`${base}/shotai/runtime-settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'single', parallelPerInstance: 99 }) })
+  assert.equal(invalid.status, 400)
+  const event = await fetch(`${base}/shotai/task-events`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-ShotAI-Operation-Id': 'operation_tooltest' }, body: JSON.stringify({ tool: 'read_sheet', state: 'completed', durationMs: 12, cached: true, arguments: 'secret document text' }) })
+  assert.equal(event.status, 200)
   const controllers = [new AbortController(), new AbortController()]
   const running = controllers.map((controller, index) => post(String(index), true, controller.signal).catch(error => error))
   await waitFor(() => active[0] === 1 && active[1] === 1)
@@ -220,6 +247,7 @@ try {
   assert.match(events, /operation_followup/)
   assert.match(events, /"runtimeId":"second"/)
   assert.match(events, /"state":"file-validated"/)
+  assert.match(events, /"tool":"read_sheet"/)
   assert.match(events, /MODEL_OUTPUT_COMPLETED/)
   assert.doesNotMatch(events, /secret document text|not finished private text/)
   assert.equal(child.exitCode, null)

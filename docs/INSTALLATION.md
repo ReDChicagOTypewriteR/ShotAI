@@ -4,10 +4,10 @@
 
 正式发布后可从 [GitHub Releases](https://github.com/ReDChicagOTypewriteR/ShotAI/releases) 下载对应平台的安装包；下表是当前源码构建使用的文件名，不代表这些文件已上传。安装包不包含模型权重。
 
-| 平台 | 1.3.0 安装包（实机测试预发布） |
+| 平台 | 1.4.1 安装包 |
 | --- | --- |
-| Windows 10/11 x86_64 | `ShotAI-1.3.0-Windows-x64-Ollama-CUDA12-Setup.exe` |
-| Ubuntu 22.04 LTS x86_64 | `ShotAI-1.3.0-Ubuntu-22.04-x86_64-Ollama-CUDA12.deb` / `.AppImage` |
+| Windows 10/11 x86_64 | `ShotAI-1.4.1-Windows-x64-Ollama-CUDA12-Setup.exe` |
+| Ubuntu 22.04 LTS x86_64 | `ShotAI-1.4.1-Ubuntu-22.04-x86_64-Ollama-CUDA12.deb` / `.AppImage` |
 
 ## Windows 安装
 
@@ -24,7 +24,7 @@ Windows 安装包包含 Ollama CUDA 12，不包含模型权重或图片运行组
 将 DEB 复制到 Ubuntu 主机，在文件所在目录打开终端：
 
 ```bash
-sudo dpkg -i ShotAI-1.3.0-Ubuntu-22.04-x86_64-Ollama-CUDA12.deb
+sudo dpkg -i ShotAI-1.4.1-Ubuntu-22.04-x86_64-Ollama-CUDA12.deb
 shotai
 ```
 
@@ -36,7 +36,7 @@ Ubuntu 安装包包含独立 Ollama 及 CUDA 12 运行库，排除 CUDA 13 和 V
 nvidia-smi
 ```
 
-1.3.0 主机“模型管理”提供“检测加载”和“运行体检”，体检记录为运行日志目录中的 `model-health.jsonl`。桌面客户端优先将日志写入桌面 `ShotAI-logs`，不可写时回退到数据目录 `logs`。体检区分模型已安装、实际驻留、CPU / GPU 混合和短推理失败；运行库配置不是 CUDA 实际加载证明。
+主机“模型管理”提供“检测加载”和“运行体检”，体检记录为运行日志目录中的 `model-health.jsonl`。桌面客户端优先将日志写入桌面 `ShotAI-logs`，不可写时回退到数据目录 `logs`。体检区分模型已安装、实际驻留、CPU / GPU 混合和短推理失败；运行库配置不是 CUDA 实际加载证明。
 
 最多接纳五个客户端；每个客户端最多一条运行、一条等待，轮流调度。并发根据模型大小、上下文和可用显存 / 内存保守估算，未知模型按单任务处理。图片生成 / 修改独占推理时段，并在开始前释放 Ollama 驻留模型。图片服务自身可能保留权重显存，后续聊天仍可能发生 CPU 回退；请以体检和实机监控为准。
 
@@ -44,9 +44,11 @@ nvidia-smi
 
 图片功能需单独安装同平台的可选扩展：将扩展目录 `runtime/image` 内的文件复制到 ShotAI 数据目录下的 `runtime/image`，Ubuntu 还需为 `sd-server` 添加执行权限，随后重启 ShotAI。启动记录写入运行日志目录的 `image-runtime.log`；应以日志中的 CUDA 后端初始化结果和实际显存占用判断是否使用 GPU，不能只依据系统检测到显卡。
 
-## 1.4.0 开发版的运行实例配置
+## 显卡分配与多人使用
 
-本节适用于当前开发源码，正式下载页的 1.3.0 安装包尚不包含这些新增配置。数据目录中的 `lan.config.json` 支持：
+1.4.1 可在主机的“设置 → 模型运行方式”中选择自动分配、多卡分担同一模型、每卡一个实例，并设置每实例并行上限。保存后从托盘完全退出并重启生效。逐卡模式默认从单请求开始，适合多人使用；跨卡模式是否加快单次回答需要实测。
+
+也可在数据目录的 `lan.config.json` 中配置：
 
 ```json
 {

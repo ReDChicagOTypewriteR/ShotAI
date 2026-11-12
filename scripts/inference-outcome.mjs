@@ -1,7 +1,9 @@
 import { StringDecoder } from 'node:string_decoder'
 
 export class InferenceOutcome {
-  constructor() {
+  constructor({ now = Date.now } = {}) {
+    this.now = now
+    this.startedAt = now()
     this.decoder = new StringDecoder('utf8')
     this.buffer = ''
     this.skipping = false
@@ -13,6 +15,15 @@ export class InferenceOutcome {
     let value
     try { value = JSON.parse(line) } catch { return }
     if (!value || typeof value !== 'object') return
+    const message = value.message || {}
+    const elapsed = Math.max(0, this.now() - this.startedAt)
+    const content = typeof message.content === 'string' ? message.content : ''
+    const thinking = typeof message.thinking === 'string' ? message.thinking : ''
+    const calls = Array.isArray(message.tool_calls) ? message.tool_calls.length : 0
+    if (content || thinking || calls) this.result.firstTokenMs ??= elapsed
+    if (content) { this.result.firstContentMs ??= elapsed; this.result.contentChars = (this.result.contentChars || 0) + content.length }
+    if (thinking) { this.result.firstThinkingMs ??= elapsed; this.result.thinkingChars = (this.result.thinkingChars || 0) + thinking.length }
+    if (calls) this.result.toolCallCount = (this.result.toolCallCount || 0) + calls
     if (value.error) {
       const message = typeof value.error === 'string' ? value.error : String(value.error.message || '')
       this.result.code = /grammar/i.test(message) ? 'GRAMMAR_PARSE_FAILED'

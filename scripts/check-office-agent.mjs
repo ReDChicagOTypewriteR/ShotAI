@@ -74,7 +74,7 @@ try {
   assert.match(result.files[1].text, /金额合计：150/)
   assert.match(result.files[1].text, /参考来源/)
   assert.match(result.evidence[0].location, /A1:B1001/)
-  assert.equal(seen[0].think, true)
+  assert.equal(seen[0].think, false)
   assert.ok(seen.slice(1).every(body => body.think === false))
   assert.ok(seen[0].tools.length > 10)
   assert.doesNotMatch(JSON.stringify(seen[0].tools), /"(?:maxLength|maxItems|minLength|minItems)"/, 'Runtime grammar must not expand collection limits')
@@ -119,7 +119,7 @@ try {
       const output = await run([...sequence, action('finish', { answer: '文件已经生成。' })], { empty: true, reasoning: round % 2 ? 'off' : 'auto' })
       assert.equal(output.files.length, 1)
       assert.ok(output.files[0].checks.length)
-      assert.equal(seen[start].think, round % 2 === 0)
+      assert.equal(seen[start].think, false)
     }
   }
   console.log(JSON.stringify({ consecutiveOfficeGeneration: { excel: 10, word: 10, pdf: 10 }, autoAndOffReasoning: true, realFileValidation: true }))

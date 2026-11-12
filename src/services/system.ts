@@ -219,6 +219,26 @@ export async function getShotAISystemInfo(): Promise<ShotAISystemInfo> {
   return fallbackInfo
 }
 
+export interface RuntimeSettingsSnapshot {
+  supported: boolean
+  configured: { mode: string; parallelPerInstance: number }
+  active: { mode: string; parallelPerInstance: number }
+  restartRequired: boolean
+  gpuCount: number
+}
+async function readRuntimeSettings(response: Response) {
+  const result = await parseSystemResponse<RuntimeSettingsSnapshot>(response, '运行设置保存或读取失败，原配置保持不变')
+  if (!result.configured || !result.active || typeof result.gpuCount !== 'number') throw new Error('无法读取运行设置')
+  return result
+}
+export async function getRuntimeSettings() {
+  return readRuntimeSettings(await fetch('/shotai/runtime-settings', { credentials: 'same-origin' }))
+}
+export async function saveRuntimeSettings(mode: string, parallelPerInstance: number) {
+  return readRuntimeSettings(await fetch('/shotai/runtime-settings', { method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode, parallelPerInstance }) }))
+}
+
 export async function cleanupModelCache(): Promise<ModelCacheCleanupResult> {
   const response = await fetch('/shotai/model-cache', {
     method: 'DELETE',

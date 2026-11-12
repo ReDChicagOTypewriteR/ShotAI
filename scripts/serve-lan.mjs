@@ -41,6 +41,7 @@ import { RuntimeMetadataCache } from './runtime-metadata.mjs'
 import { runtimeDescriptors, runtimeParallelLimit } from './runtime-pool.mjs'
 import { InferenceOutcome } from './inference-outcome.mjs'
 import diagnostics from './runtime-diagnostics.cjs'
+import runtimeSettings from './runtime-settings.cjs'
 import { gpuProcesses, observeGpuProcesses } from './runtime-gpu.mjs'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
@@ -130,6 +131,8 @@ const runtimeInstances = runtimeDescriptors(ollamaUrl,
   JSON.parse(process.env.SHOTAI_OLLAMA_INSTANCES || '[]'),
   Number(process.env.SHOTAI_RUNTIME_PARALLEL || 1))
 const runtimeFor = job => runtimeInstances.find(instance => instance.id === job.runtimeId) || runtimeInstances[0]
+const activeRuntimeSettings = { mode: process.env.SHOTAI_RUNTIME_MODE || runtimeSettings.normalizeRuntimeSettings(fileConfig.ollamaRuntime).mode,
+  parallelPerInstance: Number(process.env.SHOTAI_RUNTIME_PARALLEL || 1) }
 const maximumActiveUsers = Math.max(
   1,
   Math.min(5, Number(process.env.SHOTAI_MAX_ACTIVE_USERS || concurrencyConfig.maxActiveUsers || 5) || 5),
@@ -1327,7 +1330,7 @@ async function scheduleRequest(request, response, requestUrl, kind) {
   const updateTask = (state, details) => inferenceTasks.update(id, state, details)
   const job = { client: clientIdentity(request), kind, ready: false, modelBytes: 0, context: 4096,
     start(done) {
-      updateTask('running', { model: job.model, runtimeId: runtimeFor(job).id })
+      updateTask('running', { model: job.model, runtimeId: runtimeFor(job).id, requestOptions: job.requestOptions })
       if (kind === 'text') residentOptions.set(runtimeFor(job).id, { model: job.model, context: job.context, parallel: runtimeFor(job).parallel })
       let finished = false
       const finish = (upstreamEnded = false, result) => {
@@ -1403,6 +1406,8 @@ async function scheduleRequest(request, response, requestUrl, kind) {
     job.model = String(body.model || '')
     if (kind === 'text' && requestUrl.pathname.endsWith('/generate') && Number(body.width) > 0 && Number(body.height) > 0) job.kind = 'image'
     job.context = Math.max(2048, Math.min(131072, Number(body.options?.num_ctx) || 4096))
+    job.requestOptions = { contextLength: job.context, think: typeof body.think === 'boolean' ? body.think : null,
+      outputTokens: Number.isFinite(body.options?.num_predict) ? body.options.num_predict : null }
     if (/\/(?:embed|embeddings)$/.test(requestUrl.pathname)) job.parallelLimit = 1
     // Metadata lookup never loads a model and is bounded; cancelled requests cannot resurrect.
     const resources = await scheduler.resourceProvider()
@@ -1704,6 +1709,46 @@ async function handleModelHealth(request, response) {
 
 const server = createServer(async (request, response) => {
   const requestUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`)
+  if (requestUrl.pathname === '/shotai/runtime-settings') {
+    if (!canManageRequest(request)) { respondJson(response, 403, { code: 'ADMIN_REQUIRED', error: '运行设置仅供主机管理员修改' }); return }
+    const supported = ['embedded', 'managed'].includes(ollamaRuntimeSource)
+    if (!['GET', 'POST'].includes(request.method)) { respondMethodNotAllowed(response, 'GET, POST'); return }
+    try {
+      const gpu = await readGpuUsage()
+      const visible = String(process.env.CUDA_VISIBLE_DEVICES || '').split(',').map(value => value.trim()).filter(Boolean)
+      const devices = (gpu?.devices || []).filter(device => !visible.length || visible.includes(device.uuid) || visible.includes(String(device.index)))
+      if (request.method === 'POST') {
+        if (!supported) { respondJson(response, 409, { code: 'EXTERNAL_RUNTIME', error: '外部运行服务请在服务所在主机配置' }); return }
+        const body = await readJsonRequest(request, 2048)
+        if (!runtimeSettings.modes.includes(body.mode) || !Number.isInteger(body.parallelPerInstance) || body.parallelPerInstance < 1 || body.parallelPerInstance > 5 || Object.keys(body).some(key => !['mode', 'parallelPerInstance'].includes(key))) {
+          respondJson(response, 400, { code: 'INVALID_RUNTIME_SETTINGS', error: '无效的运行设置' }); return
+        }
+        if (body.mode !== 'single' && devices.length < 2) { respondJson(response, 400, { code: 'MULTIPLE_GPUS_REQUIRED', error: '需要检测到至少两张可见的 NVIDIA 显卡' }); return }
+        const saved = runtimeSettings.saveRuntimeSettings(process.env.SHOTAI_CONFIG_PATH || join(dataDirectory, 'lan.config.json'), body, fileConfig)
+        fileConfig.ollamaRuntime = saved.ollamaRuntime
+      }
+      const configured = runtimeSettings.normalizeRuntimeSettings(fileConfig.ollamaRuntime)
+      respondJson(response, 200, { supported, configured, active: activeRuntimeSettings,
+        restartRequired: configured.mode !== activeRuntimeSettings.mode || configured.parallelPerInstance !== activeRuntimeSettings.parallelPerInstance,
+        gpuCount: devices.length, devices: devices.map(({ index, uuid, name }) => ({ index, uuid, name })) })
+    } catch { respondJson(response, 500, { code: 'RUNTIME_SETTINGS_FAILED', error: '运行设置保存或读取失败，原配置保持不变' }) }
+    return
+  }
+  if (requestUrl.pathname === '/shotai/task-events') {
+    if (request.method !== 'POST') { respondMethodNotAllowed(response, 'POST'); return }
+    try {
+      const body = await readJsonRequest(request, 2048), operationId = String(request.headers['x-shotai-operation-id'] || '')
+      const tools = ['decision', 'list_sources', 'read_document', 'search_document', 'answer_document', 'summarize_document', 'read_sheet', 'create_table', 'filter_table', 'aggregate_table', 'deduplicate_table', 'join_tables', 'compare_tables', 'write_file', 'edit_excel', 'replace_word', 'finish']
+      if (!/^[a-zA-Z0-9_-]{8,100}$/.test(operationId) || !tools.includes(body.tool) || !['started', 'completed', 'failed'].includes(body.state) ||
+        (body.durationMs !== undefined && (!Number.isFinite(body.durationMs) || body.durationMs < 0 || body.durationMs > 3600000)) || (body.cached !== undefined && typeof body.cached !== 'boolean')) {
+        respondJson(response, 400, { code: 'INVALID_TASK_EVENT', error: '任务记录无效' }); return
+      }
+      writeTaskEvent(runtimeLogDirectory, { version: releaseVersion, buildId, operationId, id: operationId, kind: 'office', stage: 'tool',
+        state: `tool-${body.state}`, tool: body.tool, durationMs: body.durationMs, cached: body.cached })
+      respondJson(response, 200, { recorded: true })
+    } catch { respondJson(response, 400, { code: 'INVALID_TASK_EVENT', error: '任务记录无效' }) }
+    return
+  }
   if (requestUrl.pathname === '/shotai/office-results') {
     if (request.method !== 'POST') { respondMethodNotAllowed(response, 'POST'); return }
     const operationId = String(request.headers['x-shotai-operation-id'] || '')

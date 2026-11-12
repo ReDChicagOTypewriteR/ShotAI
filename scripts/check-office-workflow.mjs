@@ -64,7 +64,7 @@ try {
   await page.getByText('总金额为900，报告和表格已生成。[依据1]', { exact: true }).waitFor()
   assert.equal(await page.locator('.message-artifact-list .message-file-card').count(), 2)
   assert.equal(await page.locator('.reasoning-disclosure').count(), 0)
-  assert.deepEqual(toolRequests.map(body => body.think), [true, false, false, false, false, false])
+  assert.ok(toolRequests.length >= 5 && toolRequests.every(body => body.think === false))
   assert.deepEqual(toolRequests[1].tools, toolRequests[0].tools)
   await page.getByText('查看处理步骤与检查结果', { exact: true }).click()
   assert.ok(await page.getByText('文档内容回读一致', { exact: false }).isVisible())

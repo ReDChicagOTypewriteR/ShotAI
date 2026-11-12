@@ -5,7 +5,7 @@
     "username": "admin",
     "password": "alexjoker443477"
   },
-  "version": "1.4.0",
+  "version": "1.4.1",
   "allowLanAdministration": false,
   "ollamaUrl": "http://127.0.0.1:11434",
   "concurrency": {
