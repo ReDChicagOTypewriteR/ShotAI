@@ -79,8 +79,9 @@ ShotAI 通过运行组件支持多个开放模型厂商，不绑定单一模型�
 
 | 平台 / 方式 | 下载或说明 |
 | --- | --- |
-| Windows 10/11 x86_64 | [Windows 安装包与校验文件](https://github.com/ReDChicagOTypewriteR/ShotAI/releases) |
-| Ubuntu 22.04 x86_64 | [DEB / AppImage 与校验文件](https://github.com/ReDChicagOTypewriteR/ShotAI/releases) |
+| Windows 10/11 x86_64 | [EXE 安装包](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.4.1/ShotAI-1.4.1-Windows-x64-Ollama-CUDA12-Setup.exe) |
+| Ubuntu 22.04 x86_64 | [DEB](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.4.1/ShotAI-1.4.1-Ubuntu-22.04-x86_64-Ollama-CUDA12.deb) / [AppImage](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.4.1/ShotAI-1.4.1-Ubuntu-22.04-x86_64-Ollama-CUDA12.AppImage) |
+| 文件校验 | [SHA256SUMS-1.4.1.txt](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/download/v1.4.1/SHA256SUMS-1.4.1.txt) |
 | 图片运行扩展 | [安装说明](docs/INSTALLATION.md) |
 
 ## 项目结构
@@ -94,7 +95,7 @@ ShotAI 通过运行组件支持多个开放模型厂商，不绑定单一模型�
 
 ## 文档与支持
 
-- [从 v1.1.6 至今的 Windows / Ubuntu 更新进度](docs/UPDATES.md)
+- [Windows / Ubuntu 更新进度](docs/UPDATES.md)
 - [常见问题与排查](docs/FAQ.md)
 - [安装与部署指南](docs/INSTALLATION.md)
 - [支持的模型与厂商](docs/SUPPORTED_MODELS.md)

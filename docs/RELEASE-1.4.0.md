@@ -5,4 +5,4 @@
 - 完善并发取消、双卡实例、GPU 进程归属与模型清理。
 - 增加构建编号、任务关联、错误分类和日志轮转。
 
-该版本先提供 Ubuntu 安装包；Windows 与后续文档分析改进统一在 1.4.1 交付。
+该版本曾提供 Ubuntu 本地测试包，此处保留更新记录；当前 Windows / Ubuntu 安装包请使用 [1.4.1](https://github.com/ReDChicagOTypewriteR/ShotAI/releases/tag/v1.4.1)。
