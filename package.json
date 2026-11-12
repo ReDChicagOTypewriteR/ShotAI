@@ -76,7 +76,7 @@
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
     "docx": "^9.7.2",
-    "dompurify": "^3.4.12",
+    "dompurify": "^3.4.17",
     "element-plus": "^2.14.3",
     "hash-wasm": "^4.12.0",
     "mammoth": "^1.12.0",
@@ -129,16 +129,46 @@
         "from": "scripts/import-diagnostics.mjs",
         "to": "shotai/server/import-diagnostics.mjs"
       },
-      { "from": "scripts/model-maintenance.mjs", "to": "shotai/server/model-maintenance.mjs" },
-      { "from": "scripts/request-permissions.mjs", "to": "shotai/server/request-permissions.mjs" },
-      { "from": "scripts/task-registry.mjs", "to": "shotai/server/task-registry.mjs" },
-      { "from": "scripts/runtime-metadata.mjs", "to": "shotai/server/runtime-metadata.mjs" },
-      { "from": "scripts/runtime-pool.mjs", "to": "shotai/server/runtime-pool.mjs" },
-      { "from": "scripts/inference-outcome.mjs", "to": "shotai/server/inference-outcome.mjs" },
-      { "from": "scripts/runtime-gpu.mjs", "to": "shotai/server/runtime-gpu.mjs" },
-      { "from": "scripts/runtime-settings.cjs", "to": "shotai/server/runtime-settings.cjs" },
-      { "from": "scripts/runtime-diagnostics.cjs", "to": "shotai/server/runtime-diagnostics.cjs" },
-      { "from": "build-info.json", "to": "shotai/server/build-info.json" },
+      {
+        "from": "scripts/model-maintenance.mjs",
+        "to": "shotai/server/model-maintenance.mjs"
+      },
+      {
+        "from": "scripts/request-permissions.mjs",
+        "to": "shotai/server/request-permissions.mjs"
+      },
+      {
+        "from": "scripts/task-registry.mjs",
+        "to": "shotai/server/task-registry.mjs"
+      },
+      {
+        "from": "scripts/runtime-metadata.mjs",
+        "to": "shotai/server/runtime-metadata.mjs"
+      },
+      {
+        "from": "scripts/runtime-pool.mjs",
+        "to": "shotai/server/runtime-pool.mjs"
+      },
+      {
+        "from": "scripts/inference-outcome.mjs",
+        "to": "shotai/server/inference-outcome.mjs"
+      },
+      {
+        "from": "scripts/runtime-gpu.mjs",
+        "to": "shotai/server/runtime-gpu.mjs"
+      },
+      {
+        "from": "scripts/runtime-settings.cjs",
+        "to": "shotai/server/runtime-settings.cjs"
+      },
+      {
+        "from": "scripts/runtime-diagnostics.cjs",
+        "to": "shotai/server/runtime-diagnostics.cjs"
+      },
+      {
+        "from": "build-info.json",
+        "to": "shotai/server/build-info.json"
+      },
       {
         "from": "scripts/model-health.mjs",
         "to": "shotai/server/model-health.mjs"
